@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v33.0 (FILENAME AS TITLE)
+# AI Recruiter PRO — v34.0 (SMART MODEL RESTORED)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -15,7 +15,7 @@ from supabase import create_client, Client
 # -----------------------------
 # 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v33", layout="wide", page_icon="💎")
+st.set_page_config(page_title="AI Recruiter PRO v34", layout="wide", page_icon="🧠")
 
 st.markdown("""
 <style>
@@ -103,7 +103,7 @@ class CandidateData(BaseModel):
     historique: List[dict] = []; entretien: List[dict] = []
     # Champs systèmes
     raw_response: str = "" 
-    file_name_orig: str = "" # Pour stocker le nom du fichier
+    file_name_orig: str = "" 
 
 DEFAULT_DATA = CandidateData().dict(by_alias=True)
 
@@ -189,17 +189,18 @@ def save_search_history(query, criteria, count):
         }).execute()
     except: pass
 
-# --- PROMPT V29 ---
+# --- PROMPT V34 (INTELLIGENT) ---
 AUDITOR_PROMPT = """
-Tu es un recruteur expert.
-TACHE: Analyser CV vs AO.
-IMPORTANT: REPONDS UNIQUEMENT AVEC LE JSON.
+ROLE: Auditeur de Recrutement Senior (Expert Analyse).
+TACHE: Analyser la pertinence CV vs AO.
+INSTRUCTION: Renvoie UNIQUEMENT du JSON valide. Sois précis et exigeant.
 
 SCORING RULES (0-100):
-- Dealbreaker manquant = Score < 30.
-- Excellent = > 80.
+- Si critère critique manquant = Score < 30.
+- Si excellent profil = > 80.
+- Analyse les synonymes et le contexte (ex: Vente = Négociation).
 
-STRUCTURE JSON:
+STRUCTURE JSON REQUISE:
 {
     "infos": { "nom": "...", "poste_actuel": "...", "email": "...", "tel": "...", "ville": "...", "linkedin": "..." },
     "scores": { "global": 0, "tech": 0, "experience": 0, "fit": 0 },
@@ -215,11 +216,13 @@ STRUCTURE JSON:
 """
 
 def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
-    user_prompt = f"AO: {ao_text[:1000]}... CRITERES: {criteria}... CV: {cv_text[:1500]}..."
+    # On peut se permettre un contexte un peu plus large avec le 70B
+    user_prompt = f"AO: {ao_text[:2000]}... CRITERES: {criteria}... CV: {cv_text[:3500]}..."
     safe_data = deepcopy(DEFAULT_DATA)
     try:
         res = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant", # Eco Model
+            # RETOUR DU MONSTRE (Plus intelligent, plus gourmand)
+            model="llama-3.3-70b-versatile", 
             messages=[{"role": "system", "content": AUDITOR_PROMPT}, {"role": "user", "content": user_prompt}],
             temperature=0.0,
             response_format={"type": "json_object"} 
@@ -248,7 +251,7 @@ if 'preload_criteria' not in st.session_state: st.session_state.preload_criteria
 # -----------------------------
 # 5. INTERFACE
 # -----------------------------
-st.title("💎Alten Project_Match AO/IC/Candidats — V33")
+st.title("🧠 Projet Alten — V34 (Smart Edition)")
 
 # --- TABS ---
 tab_search, tab_ingest, tab_manage, tab_history = st.tabs(["🔎 RECHERCHE", "📥 INGESTION CV", "🗄️ GESTION BDD", "📜 HISTORIQUE AO"])
@@ -279,11 +282,11 @@ with tab_search:
     
     st.divider()
     
-    if st.button("🚀 LANCER L'ANALYSE", type="primary"):
+    if st.button("🚀 LANCER L'ANALYSE INTELLIGENTE", type="primary"):
         if not ao_content:
             st.error("⚠️ Texte de l'offre vide.")
         else:
-            with st.status("Recherche Vectorielle & Audit IA...", expanded=True) as status:
+            with st.status("Recherche & Audit IA (Modèle Llama-70B)...", expanded=True) as status:
                 # 1. Vector Search
                 q_vec = get_embedding(ao_content[:8000])
                 res_db = supabase.rpc('match_candidates', {'query_embedding': q_vec, 'match_threshold': threshold, 'match_count': limit}).execute()
@@ -295,14 +298,14 @@ with tab_search:
                 if not cands:
                     status.update(label="❌ 0 Candidat trouvé", state="error")
                 else:
-                    status.write(f"✅ {len(cands)} profils identifiés. Audit IA...")
+                    status.write(f"✅ {len(cands)} profils identifiés. Audit Expert en cours...")
                     final_results = []
                     bar = st.progress(0)
                     
                     for i, c in enumerate(cands):
                         audit = audit_candidate_groq(ao_content, c['contenu_texte'], criteria)
                         
-                        # --- MODIF V33 : STOCKAGE DU NOM DE FICHIER ---
+                        # STOCKAGE DU NOM DE FICHIER ORIGINAL
                         audit['file_name_orig'] = c.get('nom_fichier', 'Fichier Inconnu')
                         
                         final_results.append(audit)
@@ -322,20 +325,17 @@ with tab_search:
                         historique = r.get('historique', [])
                         entretien = r.get('entretien', [])
                         
-                        # NOM INTERNE (IA)
                         nom_candidat = infos.get('nom', 'Inconnu')
-                        # NOM RUBAN (FICHIER)
                         nom_fichier_titre = r.get('file_name_orig', 'Document')
 
                         s_cls = "sc-good" if sc >= 70 else "sc-mid" if sc >= 40 else "sc-bad"
                         
-                        # --- MODIF V33 : TITRE RUBAN = FICHIER ---
+                        # TITRE = NOM DE FICHIER
                         with st.expander(f"📄 {nom_fichier_titre} — Score {sc}/100", expanded=(sc>=60)):
                             
                             # EN-TÊTE RICHE
                             c_main, c_badge = st.columns([4, 1])
                             with c_main:
-                                # Le nom du candidat apparaît ici, à l'intérieur
                                 st.markdown(f"<div class='name-title'>{nom_candidat}</div>", unsafe_allow_html=True)
                                 st.markdown(f"<div class='job-subtitle'>{infos.get('poste_actuel', '')} • {infos.get('ville', '')}</div>", unsafe_allow_html=True)
                                 
