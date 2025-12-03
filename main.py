@@ -248,7 +248,7 @@ if 'preload_criteria' not in st.session_state: st.session_state.preload_criteria
 # -----------------------------
 # 5. INTERFACE
 # -----------------------------
-st.title("💎 AI Recruiter PRO — V33 (Filename Title)")
+st.title("💎Alten Project_Match AO/IC/Candidats — V33")
 
 # --- TABS ---
 tab_search, tab_ingest, tab_manage, tab_history = st.tabs(["🔎 RECHERCHE", "📥 INGESTION CV", "🗄️ GESTION BDD", "📜 HISTORIQUE AO"])
