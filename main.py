@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v31.0 (GESTION BDD + EDIT + DELETE)
+# AI Recruiter PRO — v32.0 (CRM EDITION - HISTORIQUE & RELOAD)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -15,7 +15,7 @@ from supabase import create_client, Client
 # -----------------------------
 # 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v31", layout="wide", page_icon="💎")
+st.set_page_config(page_title="AI Recruiter PRO v32", layout="wide", page_icon="💎")
 
 st.markdown("""
 <style>
@@ -151,11 +151,16 @@ def safe_json_loads(text: str) -> Dict:
     try: return json.loads(cleaned)
     except: return None
 
-# --- GESTION BDD ---
+# --- GESTION BDD & HISTORIQUE ---
 def fetch_all_candidates():
-    # On ne récupère pas le contenu_texte ni l'embedding pour aller vite
     try:
         res = supabase.table('candidates').select("id, nom_fichier, created_at").order("created_at", desc=True).execute()
+        return res.data
+    except: return []
+
+def fetch_ao_history():
+    try:
+        res = supabase.table('search_history').select("*").order("created_at", desc=True).limit(50).execute()
         return res.data
     except: return []
 
@@ -174,6 +179,13 @@ def delete_candidate(id_cand):
         time.sleep(1)
         st.rerun()
     except Exception as e: st.error(f"Erreur delete: {e}")
+
+def save_search_history(query, criteria, count):
+    try:
+        supabase.table('search_history').insert({
+            "query_text": query[:500], "criteria_used": criteria[:500], "results_count": count
+        }).execute()
+    except: pass
 
 # --- PROMPT V29 ---
 AUDITOR_PROMPT = """
@@ -226,12 +238,18 @@ def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
         return safe_data
 
 # -----------------------------
-# 4. INTERFACE
+# 4. SESSION STATE (Pour le rechargement)
 # -----------------------------
-st.title("💎 AI Recruiter PRO — Management")
+if 'preload_ao' not in st.session_state: st.session_state.preload_ao = ""
+if 'preload_criteria' not in st.session_state: st.session_state.preload_criteria = ""
+
+# -----------------------------
+# 5. INTERFACE
+# -----------------------------
+st.title("💎 ALTEN Project - Match AO/Profil IC/Candidats")
 
 # --- TABS ---
-tab_search, tab_ingest, tab_manage = st.tabs(["🔎 RECHERCHE & ANALYSE", "📥 INGESTION CV", "🗄️ GESTION BDD"])
+tab_search, tab_ingest, tab_manage, tab_history = st.tabs(["🔎 RECHERCHE", "📥 INGESTION CV", "🗄️ GESTION BDD", "📜 HISTORIQUE AO"])
 
 # --- ONGLET 1 : RECHERCHE ---
 with tab_search:
@@ -241,7 +259,9 @@ with tab_search:
     with col_upload:
         st.subheader("1. L'Offre (AO)")
         ao_pdf = st.file_uploader("Fiche de Poste (PDF)", type="pdf")
-        ao_manual = st.text_area("Ou texte", height=100)
+        
+        # On utilise le session_state pour pré-remplir si on vient de l'historique
+        ao_manual = st.text_area("Ou texte", height=150, value=st.session_state.preload_ao, key="input_ao")
         
         if ao_pdf:
             txt = extract_pdf_safe(ao_pdf.read())
@@ -253,7 +273,7 @@ with tab_search:
 
     with col_criteria:
         st.subheader("2. Paramètres")
-        criteria = st.text_area("Dealbreakers (Points Bloquants)", height=100)
+        criteria = st.text_area("Dealbreakers (Points Bloquants)", height=150, value=st.session_state.preload_criteria, key="input_crit")
         threshold = st.slider("Seuil Matching", 0.3, 0.8, 0.45)
         limit = st.number_input("Nb Profils", 1, 20, 5)
     
@@ -263,10 +283,18 @@ with tab_search:
         if not ao_content:
             st.error("⚠️ Texte de l'offre vide.")
         else:
-            with st.status("Traitement en cours...", expanded=True) as status:
+            with st.status("Recherche Vectorielle & Audit IA...", expanded=True) as status:
+                # 1. Sauvegarde
+                # On ne sauvegarde que si c'est une nouvelle recherche (pas un reload exact)
+                # (Simplification : on sauvegarde tout)
+                
+                # 2. Vector Search
                 q_vec = get_embedding(ao_content[:8000])
                 res_db = supabase.rpc('match_candidates', {'query_embedding': q_vec, 'match_threshold': threshold, 'match_count': limit}).execute()
                 cands = res_db.data
+                
+                # Sauvegarde Historique (On sauvegarde après avoir trouvé pour avoir le count)
+                save_search_history(ao_content, criteria, len(cands))
                 
                 if not cands:
                     status.update(label="❌ 0 Candidat trouvé", state="error")
@@ -412,37 +440,53 @@ with tab_ingest:
 # --- ONGLET 3 : GESTION BDD ---
 with tab_manage:
     st.header("🗄️ Gestion de la Base de Données")
-    
-    # 1. Charger la liste
     candidates = fetch_all_candidates()
-    
-    if not candidates:
-        st.info("La base est vide pour l'instant.")
+    if not candidates: st.info("Base vide.")
     else:
-        # Création d'un DataFrame pour affichage propre
         df = pd.DataFrame(candidates)
         df['Date'] = pd.to_datetime(df['created_at']).dt.strftime('%d/%m/%Y %H:%M')
-        
         st.dataframe(df[['nom_fichier', 'Date', 'id']], use_container_width=True)
-        
         st.divider()
-        st.subheader("🛠️ Actions sur un candidat")
-        
-        # Sélecteur
-        # On crée une liste de tuples (Label affiché, ID réel)
+        st.subheader("🛠️ Actions")
         options = {f"{c['nom_fichier']} ({c['created_at'][:10]})": c['id'] for c in candidates}
-        selected_label = st.selectbox("Sélectionnez un candidat à modifier/supprimer :", list(options.keys()))
+        selected_label = st.selectbox("Candidat :", list(options.keys()))
         selected_id = options[selected_label]
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            new_name = st.text_input("Nouveau nom :", value=selected_label.split(" (")[0])
+            if st.button("💾 Renommer"): update_candidate_name(selected_id, new_name)
+        with c2:
+            st.write("")
+            st.write("")
+            if st.button("🗑️ Supprimer", type="primary"): delete_candidate(selected_id)
+
+# --- ONGLET 4 : HISTORIQUE AO (NOUVEAU) ---
+with tab_history:
+    st.header("📜 Historique des Appels d'Offres")
+    history = fetch_ao_history()
+    
+    if not history:
+        st.info("Aucun historique pour l'instant.")
+    else:
+        st.markdown("Recliquez sur **Relancer** pour recharger le contexte dans l'onglet Recherche.")
         
-        col_edit, col_del = st.columns([3, 1])
-        
-        with col_edit:
-            new_name = st.text_input("Nouveau nom du fichier/profil :", value=selected_label.split(" (")[0])
-            if st.button("💾 Renommer le candidat"):
-                update_candidate_name(selected_id, new_name)
-        
-        with col_del:
-            st.write("") # Spacer
-            st.write("") 
-            if st.button("🗑️ Supprimer définitivement", type="primary"):
-                delete_candidate(selected_id)
+        for h in history:
+            col_date, col_txt, col_res, col_act = st.columns([1, 4, 1, 1])
+            
+            with col_date:
+                st.caption(h['created_at'][:10])
+            
+            with col_txt:
+                with st.expander(f"{h['query_text'][:60]}..."):
+                    st.write("**AO Complet :**", h['query_text'])
+                    st.write("**Critères :**", h['criteria_used'])
+            
+            with col_res:
+                st.markdown(f"**{h['results_count']}** profils")
+            
+            with col_act:
+                if st.button("♻️ Relancer", key=f"hist_{h['id']}"):
+                    # ON CHARGE DANS LA SESSION
+                    st.session_state.preload_ao = h['query_text']
+                    st.session_state.preload_criteria = h['criteria_used']
+                    st.toast("AO Chargé ! Allez dans l'onglet Recherche.")
