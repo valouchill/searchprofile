@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v30.0 (V17 DESIGN + V29 ENGINE)
+# AI Recruiter PRO — v31.0 (GESTION BDD + EDIT + DELETE)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -13,9 +13,9 @@ from pypdf import PdfReader
 from supabase import create_client, Client
 
 # -----------------------------
-# 0. CONFIGURATION & STYLE (DESIGN V17 RESTAURÉ)
+# 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v30", layout="wide", page_icon="💎")
+st.set_page_config(page_title="AI Recruiter PRO v31", layout="wide", page_icon="💎")
 
 st.markdown("""
 <style>
@@ -26,7 +26,7 @@ st.markdown("""
     .stApp { background: var(--bg-app); color: var(--text-main); font-family: 'Inter', sans-serif; }
     
     /* INPUTS */
-    .stTextInput input, .stTextArea textarea { border-radius: 12px; border: 2px solid #e2e8f0; }
+    .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] { border-radius: 12px; border: 2px solid #e2e8f0; }
     .stButton button { border-radius: 12px; font-weight: 700; height: 50px; }
 
     /* TYPOGRAPHY CARD */
@@ -34,7 +34,7 @@ st.markdown("""
     .job-subtitle { font-size: 0.95rem; color: #64748b; margin-top: 4px; font-weight: 500; }
     .section-header { font-size: 0.85rem; text-transform: uppercase; color: #94a3b8; font-weight: 700; margin-bottom: 10px; letter-spacing: 0.5px; margin-top: 15px;}
 
-    /* SCORE BADGE V17 STYLE */
+    /* SCORE BADGE */
     .score-badge { 
         font-size: 2rem; font-weight: 900; color: white; 
         width: 80px; height: 80px; border-radius: 16px; 
@@ -106,7 +106,7 @@ class CandidateData(BaseModel):
 DEFAULT_DATA = CandidateData().dict(by_alias=True)
 
 # -----------------------------
-# 3. FONCTIONS LOGIQUES (V29 ROBUSTE)
+# 3. FONCTIONS LOGIQUES
 # -----------------------------
 def clean_pdf_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text)
@@ -151,7 +151,31 @@ def safe_json_loads(text: str) -> Dict:
     try: return json.loads(cleaned)
     except: return None
 
-# --- PROMPT V29 (ECO FRIENDLY) ---
+# --- GESTION BDD ---
+def fetch_all_candidates():
+    # On ne récupère pas le contenu_texte ni l'embedding pour aller vite
+    try:
+        res = supabase.table('candidates').select("id, nom_fichier, created_at").order("created_at", desc=True).execute()
+        return res.data
+    except: return []
+
+def update_candidate_name(id_cand, new_name):
+    try:
+        supabase.table('candidates').update({"nom_fichier": new_name}).eq("id", id_cand).execute()
+        st.toast("✅ Nom mis à jour !")
+        time.sleep(1)
+        st.rerun()
+    except Exception as e: st.error(f"Erreur update: {e}")
+
+def delete_candidate(id_cand):
+    try:
+        supabase.table('candidates').delete().eq("id", id_cand).execute()
+        st.toast("🗑️ CV supprimé !")
+        time.sleep(1)
+        st.rerun()
+    except Exception as e: st.error(f"Erreur delete: {e}")
+
+# --- PROMPT V29 ---
 AUDITOR_PROMPT = """
 Tu es un recruteur expert.
 TACHE: Analyser CV vs AO.
@@ -204,10 +228,10 @@ def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
 # -----------------------------
 # 4. INTERFACE
 # -----------------------------
-st.title("💎 AI Recruiter PRO — Ultimate Design")
+st.title("💎 AI Recruiter PRO — Management")
 
 # --- TABS ---
-tab_search, tab_ingest = st.tabs(["🔎 RECHERCHE & ANALYSE", "📥 INGESTION CV"])
+tab_search, tab_ingest, tab_manage = st.tabs(["🔎 RECHERCHE & ANALYSE", "📥 INGESTION CV", "🗄️ GESTION BDD"])
 
 # --- ONGLET 1 : RECHERCHE ---
 with tab_search:
@@ -384,3 +408,41 @@ with tab_ingest:
             except: pass
             bar.progress((i+1)/len(files))
         st.success("Fini")
+
+# --- ONGLET 3 : GESTION BDD ---
+with tab_manage:
+    st.header("🗄️ Gestion de la Base de Données")
+    
+    # 1. Charger la liste
+    candidates = fetch_all_candidates()
+    
+    if not candidates:
+        st.info("La base est vide pour l'instant.")
+    else:
+        # Création d'un DataFrame pour affichage propre
+        df = pd.DataFrame(candidates)
+        df['Date'] = pd.to_datetime(df['created_at']).dt.strftime('%d/%m/%Y %H:%M')
+        
+        st.dataframe(df[['nom_fichier', 'Date', 'id']], use_container_width=True)
+        
+        st.divider()
+        st.subheader("🛠️ Actions sur un candidat")
+        
+        # Sélecteur
+        # On crée une liste de tuples (Label affiché, ID réel)
+        options = {f"{c['nom_fichier']} ({c['created_at'][:10]})": c['id'] for c in candidates}
+        selected_label = st.selectbox("Sélectionnez un candidat à modifier/supprimer :", list(options.keys()))
+        selected_id = options[selected_label]
+        
+        col_edit, col_del = st.columns([3, 1])
+        
+        with col_edit:
+            new_name = st.text_input("Nouveau nom du fichier/profil :", value=selected_label.split(" (")[0])
+            if st.button("💾 Renommer le candidat"):
+                update_candidate_name(selected_id, new_name)
+        
+        with col_del:
+            st.write("") # Spacer
+            st.write("") 
+            if st.button("🗑️ Supprimer définitivement", type="primary"):
+                delete_candidate(selected_id)
