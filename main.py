@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v27.0 (STABLE FIX - DuplicateID Solved)
+# AI Recruiter PRO — v28.0 (ECO MODE - Anti-429 Error)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -15,7 +15,7 @@ from supabase import create_client, Client
 # -----------------------------
 # 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v27", layout="wide", page_icon="🛠️")
+st.set_page_config(page_title="AI Recruiter PRO v28", layout="wide", page_icon="⚡")
 
 st.markdown("""
 <style>
@@ -24,16 +24,12 @@ st.markdown("""
     }
     .stApp { background: var(--bg-app); color: var(--text-main); font-family: 'Inter', sans-serif; }
     .stButton button { border-radius: 8px; font-weight: 700; height: 45px; }
-    
-    /* SCORE BADGE */
     .score-badge { 
         font-size: 1.6rem; font-weight: 900; color: white; 
         width: 65px; height: 65px; border-radius: 14px; 
         display: flex; align-items: center; justify-content: center;
     }
     .sc-good { background: #16a34a; } .sc-mid { background: #d97706; } .sc-bad { background: #dc2626; }
-    
-    /* EVIDENCE BOXES */
     .evidence-box { background: #fff; border-left: 4px solid #cbd5e1; padding: 10px; margin-bottom: 8px; }
     .ev-missing { border-left-color: #ef4444; background: #fff1f2; }
 </style>
@@ -82,7 +78,6 @@ class CandidateData(BaseModel):
     analyse: Analyse = Analyse()
     competences: Competences = Competences()
     historique: List[dict] = []; entretien: List[dict] = []
-    # Champ debug
     raw_response: str = "" 
 
 DEFAULT_DATA = CandidateData().dict(by_alias=True)
@@ -119,35 +114,25 @@ def ingest_cv_to_db(file, text):
         "nom_fichier": file.name, "contenu_texte": text, "embedding": vector
     }).execute()
 
-def save_search_history(query, criteria, count):
-    try:
-        supabase.table('search_history').insert({
-            "query_text": query[:200], "criteria_used": criteria[:200], "results_count": count
-        }).execute()
-    except: pass
-
-# --- EXTRACTION JSON INTELLIGENTE ---
 def extract_json_only(text: str) -> Dict:
     """Nettoie le texte pour ne garder que le JSON"""
     try:
         match = re.search(r'\{.*\}', text, re.DOTALL)
-        if match:
-            return json.loads(match.group())
+        if match: return json.loads(match.group())
         return json.loads(text)
-    except:
-        return None
+    except: return None
 
 # --- PROMPT ---
 AUDITOR_PROMPT = """
-ROLE: Auditeur de Recrutement.
-TACHE: Analyser CV vs AO.
-INSTRUCTION: Renvoie UNIQUEMENT du JSON valide.
+ROLE: Auditeur.
+TACHE: Score CV vs AO.
+INSTRUCTION: JSON strict uniquement.
 
-SCORING RULES (0-100):
-- Si critère impératif manquant: Score < 30.
+SCORING (0-100):
+- Si critère manquant: Score < 30.
 - Si excellent: > 80.
 
-STRUCTURE JSON REQUISE :
+STRUCTURE JSON :
 {
     "infos": { "nom": "...", "poste_actuel": "..." },
     "scores": { "global": int, "tech": int, "experience": int, "fit": int },
@@ -163,20 +148,21 @@ STRUCTURE JSON REQUISE :
 """
 
 def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
-    user_prompt = f"--- AO ---\n{ao_text[:3000]}\n\n--- CRITÈRES ---\n{criteria}\n\n--- CV ---\n{cv_text[:3500]}"
+    # OPTIMISATION TOKEN : On coupe le texte pour économiser le quota
+    user_prompt = f"--- AO ---\n{ao_text[:1500]}\n\n--- CRITÈRES ---\n{criteria}\n\n--- CV ---\n{cv_text[:2000]}"
     
     safe_data = deepcopy(DEFAULT_DATA)
-    raw_content = ""
     
     try:
         res = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            # ON CHANGE LE MODELE POUR LE RAPIDE (LIMITES PLUS HAUTES)
+            model="llama-3.1-8b-instant", 
             messages=[{"role": "system", "content": AUDITOR_PROMPT}, {"role": "user", "content": user_prompt}],
-            temperature=0.1
+            temperature=0.0
         )
         
         raw_content = res.choices[0].message.content
-        safe_data['raw_response'] = raw_content # Debug
+        safe_data['raw_response'] = raw_content
         
         ai_json = extract_json_only(raw_content)
         
@@ -186,17 +172,20 @@ def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
                     safe_data[key].update(value)
                 else: safe_data[key] = value
         else:
-             safe_data['analyse']['verdict_auditeur'] = "Erreur: L'IA n'a pas renvoyé de JSON valide."
+             safe_data['analyse']['verdict_auditeur'] = "Erreur: JSON invalide."
 
         return safe_data
+    except openai.RateLimitError:
+        safe_data['analyse']['verdict_auditeur'] = "⚠️ ERREUR 429: Limite Groq atteinte. Attendez 15min ou changez de clé."
+        return safe_data
     except Exception as e:
-        safe_data['analyse']['verdict_auditeur'] = f"Erreur Technique: {str(e)}"
+        safe_data['analyse']['verdict_auditeur'] = f"Erreur: {str(e)}"
         return safe_data
 
 # -----------------------------
 # 4. INTERFACE
 # -----------------------------
-st.title("🛠️ AI Recruiter PRO — Fix & Debug")
+st.title("⚡ AI Recruiter PRO — Eco Mode")
 
 # --- TABS ---
 tab_search, tab_ingest = st.tabs(["🔎 AUDIT", "📥 INGESTION"])
@@ -217,7 +206,7 @@ with tab_search:
                 ao_content = txt
                 st.success(f"✅ PDF lu ({len(txt)} chars)")
             else:
-                st.error("⚠️ PDF vide ou illisible (Image ?)")
+                st.error("⚠️ PDF vide.")
         elif ao_manual: ao_content = ao_manual
 
     with col_criteria:
@@ -238,9 +227,9 @@ with tab_search:
                 cands = res_db.data
                 
                 if not cands:
-                    status.update(label="❌ 0 Candidat trouvé (Vérifiez le seuil ou la DB)", state="error")
+                    status.update(label="❌ 0 Candidat trouvé", state="error")
                 else:
-                    status.write(f"✅ {len(cands)} profils. Analyse IA...")
+                    status.write(f"✅ {len(cands)} profils. Analyse ECO (Llama 8B)...")
                     final_results = []
                     bar = st.progress(0)
                     
@@ -260,15 +249,15 @@ with tab_search:
                     
                     st.subheader("Résultats")
                     
-                    # --- CORRECTION DE LA BOUCLE ---
                     for i, r in enumerate(final_results):
                         sc = r.get('scores', {}).get('global', 0)
                         nom = r.get('infos', {}).get('nom', 'Inconnu')
                         
+                        # CLÉ UNIQUE AJOUTÉE ICI (key=f"exp_{i}") POUR ÉVITER L'ERREUR DUPLICATE ID
                         with st.expander(f"{nom} — Score {sc}/100", expanded=(sc>=0)):
-                            # Zone Debug AVEC CLÉ UNIQUE (FIX ERROR)
                             st.markdown("#### 🛠️ DEBUG ZONE")
-                            st.text_area("Réponse brute IA", r.get('raw_response', 'Vide'), height=150, key=f"debug_{i}")
+                            # CLÉ UNIQUE AJOUTÉE ICI (key=f"debug_{i}")
+                            st.text_area("Réponse brute IA", r.get('raw_response', 'Vide'), height=100, key=f"debug_{i}")
                             
                             st.divider()
                             
