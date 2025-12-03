@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v28.0 (ECO MODE - Anti-429 Error)
+# AI Recruiter PRO — v29.0 (JSON RESCUE EDITION)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -15,13 +15,11 @@ from supabase import create_client, Client
 # -----------------------------
 # 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v28", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="AI Recruiter PRO v29", layout="wide", page_icon="🛡️")
 
 st.markdown("""
 <style>
-    :root {
-        --primary:#dc2626; --bg-app:#f8fafc; --text-main:#0f172a; --border:#cbd5e1;
-    }
+    :root { --primary:#dc2626; --bg-app:#f8fafc; --text-main:#0f172a; }
     .stApp { background: var(--bg-app); color: var(--text-main); font-family: 'Inter', sans-serif; }
     .stButton button { border-radius: 8px; font-weight: 700; height: 45px; }
     .score-badge { 
@@ -114,28 +112,38 @@ def ingest_cv_to_db(file, text):
         "nom_fichier": file.name, "contenu_texte": text, "embedding": vector
     }).execute()
 
-def extract_json_only(text: str) -> Dict:
-    """Nettoie le texte pour ne garder que le JSON"""
+# --- NETTOYEUR DE JSON (LE SAUVEUR) ---
+def clean_json_string(text: str) -> str:
+    """Enlève le markdown ```json ... ``` et les commentaires"""
+    # Enlever les balises code markdown
+    text = re.sub(r'```json', '', text)
+    text = re.sub(r'```', '', text)
+    # Chercher le premier { et le dernier }
+    start = text.find('{')
+    end = text.rfind('}') + 1
+    if start != -1 and end != -1:
+        return text[start:end]
+    return text
+
+def safe_json_loads(text: str) -> Dict:
+    """Tente de charger le JSON même s'il est sale"""
+    cleaned = clean_json_string(text)
     try:
-        match = re.search(r'\{.*\}', text, re.DOTALL)
-        if match: return json.loads(match.group())
-        return json.loads(text)
-    except: return None
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        return None
 
-# --- PROMPT ---
+# --- PROMPT SIMPLIFIÉ POUR LLAMA 8B ---
 AUDITOR_PROMPT = """
-ROLE: Auditeur.
-TACHE: Score CV vs AO.
-INSTRUCTION: JSON strict uniquement.
+Tu es un recruteur expert. Analyse le CV par rapport à l'offre (AO).
+Règles:
+1. Si un critère critique manque, score < 30.
+2. Si le CV est bon, score > 70.
+3. REPONDS UNIQUEMENT AVEC LE JSON CI-DESSOUS. RIEN D'AUTRE.
 
-SCORING (0-100):
-- Si critère manquant: Score < 30.
-- Si excellent: > 80.
-
-STRUCTURE JSON :
 {
-    "infos": { "nom": "...", "poste_actuel": "..." },
-    "scores": { "global": int, "tech": int, "experience": int, "fit": int },
+    "infos": { "nom": "Nom trouvé ou Inconnu", "poste_actuel": "..." },
+    "scores": { "global": 0, "tech": 0, "experience": 0, "fit": 0 },
     "competences": {
         "match_details": [ {"skill": "...", "preuve": "...", "niveau": "..."} ],
         "manquant_critique": ["..."],
@@ -148,23 +156,26 @@ STRUCTURE JSON :
 """
 
 def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
-    # OPTIMISATION TOKEN : On coupe le texte pour économiser le quota
-    user_prompt = f"--- AO ---\n{ao_text[:1500]}\n\n--- CRITÈRES ---\n{criteria}\n\n--- CV ---\n{cv_text[:2000]}"
+    # On réduit le contexte pour économiser des tokens
+    user_prompt = f"AO: {ao_text[:1000]}... CRITERES: {criteria}... CV: {cv_text[:1500]}..."
     
     safe_data = deepcopy(DEFAULT_DATA)
     
     try:
         res = groq_client.chat.completions.create(
-            # ON CHANGE LE MODELE POUR LE RAPIDE (LIMITES PLUS HAUTES)
+            # Modèle léger
             model="llama-3.1-8b-instant", 
             messages=[{"role": "system", "content": AUDITOR_PROMPT}, {"role": "user", "content": user_prompt}],
-            temperature=0.0
+            temperature=0.0,
+            # Force JSON Mode (Important pour Llama 3.1)
+            response_format={"type": "json_object"} 
         )
         
         raw_content = res.choices[0].message.content
         safe_data['raw_response'] = raw_content
         
-        ai_json = extract_json_only(raw_content)
+        # Tentative de parsing robuste
+        ai_json = safe_json_loads(raw_content)
         
         if ai_json:
             for key, value in ai_json.items():
@@ -172,11 +183,12 @@ def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
                     safe_data[key].update(value)
                 else: safe_data[key] = value
         else:
-             safe_data['analyse']['verdict_auditeur'] = "Erreur: JSON invalide."
+             safe_data['analyse']['verdict_auditeur'] = "Erreur JSON: L'IA a mal formaté la réponse."
 
         return safe_data
+        
     except openai.RateLimitError:
-        safe_data['analyse']['verdict_auditeur'] = "⚠️ ERREUR 429: Limite Groq atteinte. Attendez 15min ou changez de clé."
+        safe_data['analyse']['verdict_auditeur'] = "⚠️ Erreur 429: Quota Groq dépassé."
         return safe_data
     except Exception as e:
         safe_data['analyse']['verdict_auditeur'] = f"Erreur: {str(e)}"
@@ -185,7 +197,7 @@ def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
 # -----------------------------
 # 4. INTERFACE
 # -----------------------------
-st.title("⚡ AI Recruiter PRO — Eco Mode")
+st.title("🛡️ AI Recruiter PRO — V29 (JSON Fix)")
 
 # --- TABS ---
 tab_search, tab_ingest = st.tabs(["🔎 AUDIT", "📥 INGESTION"])
@@ -205,8 +217,7 @@ with tab_search:
             if txt: 
                 ao_content = txt
                 st.success(f"✅ PDF lu ({len(txt)} chars)")
-            else:
-                st.error("⚠️ PDF vide.")
+            else: st.error("⚠️ PDF vide.")
         elif ao_manual: ao_content = ao_manual
 
     with col_criteria:
@@ -229,7 +240,7 @@ with tab_search:
                 if not cands:
                     status.update(label="❌ 0 Candidat trouvé", state="error")
                 else:
-                    status.write(f"✅ {len(cands)} profils. Analyse ECO (Llama 8B)...")
+                    status.write(f"✅ {len(cands)} profils. Analyse IA...")
                     final_results = []
                     bar = st.progress(0)
                     
@@ -253,13 +264,13 @@ with tab_search:
                         sc = r.get('scores', {}).get('global', 0)
                         nom = r.get('infos', {}).get('nom', 'Inconnu')
                         
-                        # CLÉ UNIQUE AJOUTÉE ICI (key=f"exp_{i}") POUR ÉVITER L'ERREUR DUPLICATE ID
+                        # CLÉ UNIQUE POUR DEBUG
                         with st.expander(f"{nom} — Score {sc}/100", expanded=(sc>=0)):
-                            st.markdown("#### 🛠️ DEBUG ZONE")
-                            # CLÉ UNIQUE AJOUTÉE ICI (key=f"debug_{i}")
-                            st.text_area("Réponse brute IA", r.get('raw_response', 'Vide'), height=100, key=f"debug_{i}")
                             
-                            st.divider()
+                            # DEBUG: Afficher la réponse brute si JSON invalide
+                            if "Erreur JSON" in r['analyse'].get('verdict_auditeur', ''):
+                                st.error("L'IA a renvoyé du texte invalide. Voici le contenu brut :")
+                                st.text_area("Raw", r.get('raw_response', ''), height=100, key=f"bug_{i}")
                             
                             c1, c2 = st.columns([4, 1])
                             c1.info(r['analyse'].get('verdict_auditeur'))
