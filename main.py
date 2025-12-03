@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v37.0 (SEVERE SCORING & SCEPTIC AUDIT)
+# AI Recruiter PRO — v38.0 (ALL FEATURES RESTORED)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -15,7 +15,7 @@ from supabase import create_client, Client
 # -----------------------------
 # 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v37", layout="wide", page_icon="⚖️")
+st.set_page_config(page_title="AI Recruiter PRO v38", layout="wide", page_icon="⚖️")
 
 st.markdown("""
 <style>
@@ -24,17 +24,11 @@ st.markdown("""
         --score-good:#16a34a; --score-mid:#d97706; --score-bad:#dc2626;
     }
     .stApp { background: var(--bg-app); color: var(--text-main); font-family: 'Inter', sans-serif; }
-    
-    /* INPUTS */
     .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] { border-radius: 12px; border: 2px solid #e2e8f0; }
     .stButton button { border-radius: 12px; font-weight: 700; height: 50px; }
-
-    /* TYPOGRAPHY CARD */
     .name-title { font-size: 1.6rem; font-weight: 800; color: #1e293b; margin: 0; line-height: 1.2; }
     .job-subtitle { font-size: 0.95rem; color: #64748b; margin-top: 4px; font-weight: 500; }
     .section-header { font-size: 0.85rem; text-transform: uppercase; color: #94a3b8; font-weight: 700; margin-bottom: 10px; letter-spacing: 0.5px; margin-top: 15px;}
-
-    /* SCORE BADGE */
     .score-badge { 
         font-size: 2rem; font-weight: 900; color: white; 
         width: 80px; height: 80px; border-radius: 16px; 
@@ -44,15 +38,11 @@ st.markdown("""
     .sc-good { background: linear-gradient(135deg, #16a34a, #15803d); }
     .sc-mid { background: linear-gradient(135deg, #d97706, #b45309); }
     .sc-bad { background: linear-gradient(135deg, #dc2626, #991b1b); }
-
-    /* EVIDENCE BOXES */
     .evidence-box { background: #f8fafc; border-left: 4px solid #cbd5e1; padding: 12px 15px; margin-bottom: 8px; border-radius: 0 8px 8px 0; }
     .ev-skill { font-weight: 700; color: #334155; font-size: 0.95rem; }
     .ev-proof { font-size: 0.9rem; color: #475569; font-style: italic; margin-top: 4px; }
     .ev-missing { border-left-color: #ef4444; background: #fff1f2; }
     .ev-missing .ev-skill { color: #991b1b; }
-
-    /* TAGS */
     .tag { display: inline-block; padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; margin-right: 6px; margin-bottom: 6px; }
     .tag-blue { background: #eff6ff; color: #1d4ed8; border: 1px solid #dbeafe; }
 </style>
@@ -67,7 +57,6 @@ def init_connections():
         supa_url = st.secrets["supabase"]["url"]
         supa_key = st.secrets["supabase"]["key"]
         supabase: Client = create_client(supa_url, supa_key)
-        
         openai_client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
         groq_client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=st.secrets["GROQ_API_KEY"])
         return supabase, openai_client, groq_client
@@ -138,7 +127,6 @@ def ingest_cv_to_db(file, text):
         "nom_fichier": file.name, "contenu_texte": text, "embedding": vector
     }).execute()
 
-# --- NETTOYEUR JSON ---
 def clean_json_string(text: str) -> str:
     text = re.sub(r'```json', '', text)
     text = re.sub(r'```', '', text)
@@ -188,7 +176,7 @@ def save_search_history(query, criteria, count):
         }).execute()
     except: pass
 
-# --- AUTO-EXTRACTION CRITERES (FIXED) ---
+# --- AUTO-EXTRACTION CRITERES (LE RETOUR) ---
 def extract_criteria_ai(ao_text: str) -> str:
     prompt = f"""
     Agis comme un expert en recrutement. Lis cette offre d'emploi et extrais les critères sous ce format exact :
@@ -212,7 +200,7 @@ def extract_criteria_ai(ao_text: str) -> str:
     except Exception as e:
         return f"Erreur extraction: {e}"
 
-# --- PROMPT AUDIT (SCEPTIQUE & SEVERE) ---
+# --- PROMPT AUDIT (SÉVÈRE V37) ---
 AUDITOR_PROMPT = """
 ROLE: Auditeur de Risque Recrutement (Sceptique & Sévère).
 TACHE: Vérifier la véracité et l'adéquation d'un profil vs AO.
@@ -252,12 +240,11 @@ def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
         res = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile", # Smart Model
             messages=[{"role": "system", "content": AUDITOR_PROMPT}, {"role": "user", "content": user_prompt}],
-            temperature=0.0, # Zéro créativité = Sévérité max
+            temperature=0.0,
             response_format={"type": "json_object"} 
         )
         raw_content = res.choices[0].message.content
         safe_data['raw_response'] = raw_content
-        
         ai_json = safe_json_loads(raw_content)
         if ai_json:
             for key, value in ai_json.items():
@@ -279,7 +266,7 @@ if 'crit_input' not in st.session_state: st.session_state.crit_input = ""
 # -----------------------------
 # 5. INTERFACE
 # -----------------------------
-st.title("⚖️ AI Recruiter PRO — V37 (Severe Audit)")
+st.title("⚖️ AI Recruiter PRO — V38 (Complete Fix)")
 
 # --- TABS ---
 tab_search, tab_ingest, tab_manage, tab_history = st.tabs(["🔎 RECHERCHE", "📥 INGESTION CV", "🗄️ GESTION BDD", "📜 HISTORIQUE AO"])
@@ -299,8 +286,9 @@ with tab_search:
             if txt: 
                 ao_content = txt
                 st.success(f"✅ PDF lu ({len(txt)} chars)")
+                # BOUTON PDF (FIXED)
                 if st.button("✨ Extraire les critères via IA", type="secondary"):
-                    with st.spinner("Analyse intelligente..."):
+                    with st.spinner("Analyse..."):
                         extracted = extract_criteria_ai(txt)
                         st.session_state.crit_input = extracted
                         st.toast("✅ Critères extraits !", icon="✨")
@@ -309,11 +297,12 @@ with tab_search:
             else: st.error("⚠️ PDF vide.")
         elif ao_manual: 
             ao_content = ao_manual
+            # BOUTON TEXTE (FIXED)
             if st.button("✨ Extraire les critères via IA", type="secondary"):
                 if not ao_content:
                     st.error("❌ Texte vide.")
                 else:
-                    with st.spinner("Analyse intelligente..."):
+                    with st.spinner("Analyse..."):
                         extracted = extract_criteria_ai(ao_content)
                         st.session_state.crit_input = extracted
                         st.toast("✅ Critères extraits !", icon="✨")
@@ -322,8 +311,9 @@ with tab_search:
 
     with col_criteria:
         st.subheader("2. Paramètres")
+        # IMPORTANT : key="crit_input" pour lier au bouton
         criteria = st.text_area("Dealbreakers (Points Bloquants)", height=250, key="crit_input")
-        threshold = st.slider("Seuil Matching (Filtre)", 0.3, 0.8, 0.45)
+        threshold = st.slider("Seuil Matching", 0.3, 0.8, 0.45)
         limit = st.number_input("Nb Profils", 1, 20, 5)
     
     st.divider()
@@ -344,7 +334,7 @@ with tab_search:
                 if not cands:
                     status.update(label="❌ 0 Candidat trouvé", state="error")
                 else:
-                    status.write(f"✅ {len(cands)} profils. Audit Sceptique en cours...")
+                    status.write(f"✅ {len(cands)} profils. Audit Expert...")
                     final_results = []
                     bar = st.progress(0)
                     
@@ -369,8 +359,6 @@ with tab_search:
                         
                         nom_candidat = infos.get('nom', 'Inconnu')
                         nom_fichier_titre = r.get('file_name_orig', 'Document')
-                        
-                        # Palier plus dur pour le vert
                         s_cls = "sc-good" if sc >= 75 else "sc-mid" if sc >= 50 else "sc-bad"
                         
                         with st.expander(f"📄 {nom_fichier_titre} — Score {sc}/100", expanded=(sc>=60)):
@@ -390,7 +378,7 @@ with tab_search:
                                     for flag in red_flags: st.error(f"🚩 {flag}")
                                 
                                 manquants = competences.get('manquant_critique', [])
-                                if manquants: st.error(f"⛔ **Disqualification :** {', '.join(manquants)}")
+                                if manquants: st.error(f"⛔ **Manquants :** {', '.join(manquants)}")
                                 
                                 st.info(f"💡 **Verdict:** {analyse.get('verdict_auditeur', '...')}")
 
