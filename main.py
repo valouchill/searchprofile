@@ -15,7 +15,7 @@ from supabase import create_client, Client
 # -----------------------------
 # 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v24", layout="wide", page_icon="🎯")
+st.set_page_config(page_title="Valentin IC/Candi - Search", layout="wide", page_icon="🎯")
 
 st.markdown("""
 <style>
