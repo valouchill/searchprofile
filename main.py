@@ -1,4 +1,4 @@
-# Valentin Gestion des profils — v26.0 (DEBUG & FIX EDITION)
+# AI Recruiter PRO — v27.0 (STABLE FIX - DuplicateID Solved)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -15,7 +15,7 @@ from supabase import create_client, Client
 # -----------------------------
 # 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v26 (Debug)", layout="wide", page_icon="🛠️")
+st.set_page_config(page_title="AI Recruiter PRO v27", layout="wide", page_icon="🛠️")
 
 st.markdown("""
 <style>
@@ -82,13 +82,13 @@ class CandidateData(BaseModel):
     analyse: Analyse = Analyse()
     competences: Competences = Competences()
     historique: List[dict] = []; entretien: List[dict] = []
-    # Champ debug ajouté
+    # Champ debug
     raw_response: str = "" 
 
 DEFAULT_DATA = CandidateData().dict(by_alias=True)
 
 # -----------------------------
-# 3. FONCTIONS LOGIQUES (AVEC FIX JSON)
+# 3. FONCTIONS LOGIQUES
 # -----------------------------
 def clean_pdf_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text)
@@ -126,26 +126,25 @@ def save_search_history(query, criteria, count):
         }).execute()
     except: pass
 
-# --- EXTRACTION JSON INTELLIGENTE (LE FIX MAJEUR) ---
+# --- EXTRACTION JSON INTELLIGENTE ---
 def extract_json_only(text: str) -> Dict:
-    """Cherche le premier bloc { ... } dans le texte"""
+    """Nettoie le texte pour ne garder que le JSON"""
     try:
         match = re.search(r'\{.*\}', text, re.DOTALL)
         if match:
             return json.loads(match.group())
-        return json.loads(text) # Tentative directe
+        return json.loads(text)
     except:
         return None
 
 # --- PROMPT ---
 AUDITOR_PROMPT = """
-ROLE: Auditeur de Recrutement Impitoyable.
+ROLE: Auditeur de Recrutement.
 TACHE: Analyser CV vs AO.
-INSTRUCTION IMPORTANTE: Renvoie UNIQUEMENT du JSON valide. Pas d'introduction, pas de markdown.
+INSTRUCTION: Renvoie UNIQUEMENT du JSON valide.
 
 SCORING RULES (0-100):
 - Si critère impératif manquant: Score < 30.
-- Si CV hors sujet: Score < 20.
 - Si excellent: > 80.
 
 STRUCTURE JSON REQUISE :
@@ -173,13 +172,12 @@ def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
         res = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": AUDITOR_PROMPT}, {"role": "user", "content": user_prompt}],
-            temperature=0.1 # Légère créativité pour éviter les blocages
+            temperature=0.1
         )
         
         raw_content = res.choices[0].message.content
-        safe_data['raw_response'] = raw_content # On stocke pour le debug
+        safe_data['raw_response'] = raw_content # Debug
         
-        # Utilisation de l'extracteur intelligent
         ai_json = extract_json_only(raw_content)
         
         if ai_json:
@@ -187,17 +185,18 @@ def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
                 if key in safe_data and isinstance(safe_data[key], dict) and isinstance(value, dict):
                     safe_data[key].update(value)
                 else: safe_data[key] = value
-        
+        else:
+             safe_data['analyse']['verdict_auditeur'] = "Erreur: L'IA n'a pas renvoyé de JSON valide."
+
         return safe_data
     except Exception as e:
-        print(f"Err IA: {e}")
-        safe_data['analyse']['verdict_auditeur'] = f"Erreur Technique IA: {str(e)}"
+        safe_data['analyse']['verdict_auditeur'] = f"Erreur Technique: {str(e)}"
         return safe_data
 
 # -----------------------------
 # 4. INTERFACE
 # -----------------------------
-st.title("🛠️ AI Recruiter PRO — Debug Mode")
+st.title("🛠️ AI Recruiter PRO — Fix & Debug")
 
 # --- TABS ---
 tab_search, tab_ingest = st.tabs(["🔎 AUDIT", "📥 INGESTION"])
@@ -216,7 +215,7 @@ with tab_search:
             txt = extract_pdf_safe(ao_pdf.read())
             if txt: 
                 ao_content = txt
-                st.info(f"✅ PDF lu ({len(txt)} chars). Début: {txt[:100]}...")
+                st.success(f"✅ PDF lu ({len(txt)} chars)")
             else:
                 st.error("⚠️ PDF vide ou illisible (Image ?)")
         elif ao_manual: ao_content = ao_manual
@@ -248,7 +247,6 @@ with tab_search:
                     for i, c in enumerate(cands):
                         audit = audit_candidate_groq(ao_content, c['contenu_texte'], criteria)
                         
-                        # Fix Nom
                         infos = audit.get('infos', {})
                         if not infos.get('nom') or infos.get('nom') == "Candidat Inconnu":
                             if 'infos' not in audit: audit['infos'] = {}
@@ -261,19 +259,19 @@ with tab_search:
                     final_results.sort(key=lambda x: x.get('scores', {}).get('global', 0), reverse=True)
                     
                     st.subheader("Résultats")
-                    for r in final_results:
+                    
+                    # --- CORRECTION DE LA BOUCLE ---
+                    for i, r in enumerate(final_results):
                         sc = r.get('scores', {}).get('global', 0)
                         nom = r.get('infos', {}).get('nom', 'Inconnu')
                         
-                        # --- DEBUG EXPANDER (POUR VOIR CE QUI CLOCHE) ---
                         with st.expander(f"{nom} — Score {sc}/100", expanded=(sc>=0)):
-                            # Zone Debug
-                            st.markdown("#### 🛠️ DEBUG ZONE (Qu'a dit l'IA ?)")
-                            st.text_area("Réponse brute de l'IA (JSON)", r.get('raw_response', 'Vide'), height=150)
+                            # Zone Debug AVEC CLÉ UNIQUE (FIX ERROR)
+                            st.markdown("#### 🛠️ DEBUG ZONE")
+                            st.text_area("Réponse brute IA", r.get('raw_response', 'Vide'), height=150, key=f"debug_{i}")
                             
                             st.divider()
                             
-                            # Affichage Normal
                             c1, c2 = st.columns([4, 1])
                             c1.info(r['analyse'].get('verdict_auditeur'))
                             c2.metric("Score", sc)
