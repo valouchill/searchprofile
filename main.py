@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v38.0 (ALL FEATURES RESTORED)
+# AI Recruiter PRO — v39.0 (SCORE OVERRIDE - Python Logic)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -15,13 +15,12 @@ from supabase import create_client, Client
 # -----------------------------
 # 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v38", layout="wide", page_icon="⚖️")
+st.set_page_config(page_title="AI Recruiter PRO v39", layout="wide", page_icon="📉")
 
 st.markdown("""
 <style>
     :root {
         --primary:#2563eb; --bg-app:#f8fafc; --text-main:#0f172a; --border:#cbd5e1;
-        --score-good:#16a34a; --score-mid:#d97706; --score-bad:#dc2626;
     }
     .stApp { background: var(--bg-app); color: var(--text-main); font-family: 'Inter', sans-serif; }
     .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] { border-radius: 12px; border: 2px solid #e2e8f0; }
@@ -176,19 +175,15 @@ def save_search_history(query, criteria, count):
         }).execute()
     except: pass
 
-# --- AUTO-EXTRACTION CRITERES (LE RETOUR) ---
+# --- AUTO-EXTRACTION CRITERES ---
 def extract_criteria_ai(ao_text: str) -> str:
     prompt = f"""
     Agis comme un expert en recrutement. Lis cette offre d'emploi et extrais les critères sous ce format exact :
-    
     1. IMPÉRATIFS (DEALBREAKERS) :
     - ...
-    
     2. SECONDAIRES (BONUS) :
     - ...
-    
-    OFFRE :
-    {ao_text[:3000]}
+    OFFRE : {ao_text[:3000]}
     """
     try:
         res = groq_client.chat.completions.create(
@@ -200,36 +195,27 @@ def extract_criteria_ai(ao_text: str) -> str:
     except Exception as e:
         return f"Erreur extraction: {e}"
 
-# --- PROMPT AUDIT (SÉVÈRE V37) ---
+# --- PROMPT AUDIT ---
 AUDITOR_PROMPT = """
-ROLE: Auditeur de Risque Recrutement (Sceptique & Sévère).
-TACHE: Vérifier la véracité et l'adéquation d'un profil vs AO.
-PHILOSOPHIE: "Pas de preuve chiffrée = Pas de points". Le candidat est présumé "vendeur de rêve" par défaut.
+ROLE: Auditeur de Recrutement Factuel.
+TACHE: Identifier les compétences PRÉSENTES ou ABSENTES.
 
-ÉCHELLE DE NOTATION SÉVÈRE (GLOBAL SCORE /100) :
-- [0-40] DISQUALIFIÉ : Manque un critère impératif (Langue, Diplôme, Expérience dure).
-- [41-60] RISQUÉ : Profil junior, reconversion, ou compétences citées sans contexte/durée.
-- [61-75] STANDARD : Profil qui fait le job, sans plus.
-- [76-85] SOLIDE : Match parfait, preuves concrètes partout.
-- [86-100] EXCEPTIONNEL : Mouton à 5 pattes uniquement.
+INSTRUCTION CRUCIALE POUR LES LISTES :
+- Si un critère (Dealbreaker) est manquant, tu DOIS l'ajouter dans la liste "manquant_critique".
+- Si un critère secondaire est manquant, tu DOIS l'ajouter dans "manquant_secondaire".
 
-RÈGLES DE PÉNALITÉ :
-1. Si un dealbreaker est "à peu près" là mais pas exact (ex: Anglais B2 au lieu de C1) -> SCORE MAX 50.
-2. Si les descriptions sont floues ("participation à...", "aide sur...") -> PENALITÉ -15 PTS.
-3. Si le CV est mal structuré ou bourré de fautes -> PENALITÉ -10 PTS (Fit).
-
-FORMAT JSON STRICT :
+STRUCTURE JSON :
 {
     "infos": { "nom": "...", "poste_actuel": "...", "email": "...", "tel": "...", "ville": "...", "linkedin": "..." },
-    "scores": { "global": int, "tech": int, "experience": int, "fit": int },
+    "scores": { "global": int (Estimation), "tech": int, "experience": int, "fit": int },
     "competences": {
-        "match_details": [ {"skill": "...", "preuve": "Citation précise (Date/Chiffre)", "niveau": "Expert/Confirmé/Junior"} ],
-        "manquant_critique": ["LISTE PRÉCISE"],
-        "manquant_secondaire": ["..."]
+        "match_details": [ {"skill": "...", "preuve": "...", "niveau": "..."} ],
+        "manquant_critique": ["LISTE..."],
+        "manquant_secondaire": ["LISTE..."]
     },
-    "analyse": { "verdict_auditeur": "Ton sévère et factuel. Commence par 'PROFIL RISQUÉ' ou 'PROFIL SOLIDE'...", "red_flags": ["..."] },
+    "analyse": { "verdict_auditeur": "...", "red_flags": ["..."] },
     "historique": [ {"titre": "...", "entreprise": "...", "duree": "..."} ],
-    "entretien": [ {"question": "Question piège pour vérifier...", "reponse_attendue": "..."} ]
+    "entretien": [ {"question": "...", "reponse_attendue": "..."} ]
 }
 """
 
@@ -238,7 +224,7 @@ def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
     safe_data = deepcopy(DEFAULT_DATA)
     try:
         res = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile", # Smart Model
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": AUDITOR_PROMPT}, {"role": "user", "content": user_prompt}],
             temperature=0.0,
             response_format={"type": "json_object"} 
@@ -266,7 +252,7 @@ if 'crit_input' not in st.session_state: st.session_state.crit_input = ""
 # -----------------------------
 # 5. INTERFACE
 # -----------------------------
-st.title("⚖️ AI Recruiter PRO — V38 (Complete Fix)")
+st.title("📉 AI Recruiter PRO — V39 (Score Override)")
 
 # --- TABS ---
 tab_search, tab_ingest, tab_manage, tab_history = st.tabs(["🔎 RECHERCHE", "📥 INGESTION CV", "🗄️ GESTION BDD", "📜 HISTORIQUE AO"])
@@ -286,7 +272,6 @@ with tab_search:
             if txt: 
                 ao_content = txt
                 st.success(f"✅ PDF lu ({len(txt)} chars)")
-                # BOUTON PDF (FIXED)
                 if st.button("✨ Extraire les critères via IA", type="secondary"):
                     with st.spinner("Analyse..."):
                         extracted = extract_criteria_ai(txt)
@@ -297,7 +282,6 @@ with tab_search:
             else: st.error("⚠️ PDF vide.")
         elif ao_manual: 
             ao_content = ao_manual
-            # BOUTON TEXTE (FIXED)
             if st.button("✨ Extraire les critères via IA", type="secondary"):
                 if not ao_content:
                     st.error("❌ Texte vide.")
@@ -311,7 +295,6 @@ with tab_search:
 
     with col_criteria:
         st.subheader("2. Paramètres")
-        # IMPORTANT : key="crit_input" pour lier au bouton
         criteria = st.text_area("Dealbreakers (Points Bloquants)", height=250, key="crit_input")
         threshold = st.slider("Seuil Matching", 0.3, 0.8, 0.45)
         limit = st.number_input("Nb Profils", 1, 20, 5)
@@ -324,7 +307,7 @@ with tab_search:
         if not final_ao:
             st.error("⚠️ Texte de l'offre vide.")
         else:
-            with st.status("Recherche & Audit Sévère...", expanded=True) as status:
+            with st.status("Recherche & Audit en cours...", expanded=True) as status:
                 q_vec = get_embedding(final_ao[:8000])
                 res_db = supabase.rpc('match_candidates', {'query_embedding': q_vec, 'match_threshold': threshold, 'match_count': limit}).execute()
                 cands = res_db.data
@@ -334,7 +317,7 @@ with tab_search:
                 if not cands:
                     status.update(label="❌ 0 Candidat trouvé", state="error")
                 else:
-                    status.write(f"✅ {len(cands)} profils. Audit Expert...")
+                    status.write(f"✅ {len(cands)} profils. Audit Sceptique...")
                     final_results = []
                     bar = st.progress(0)
                     
@@ -343,6 +326,36 @@ with tab_search:
                         audit['file_name_orig'] = c.get('nom_fichier', 'Fichier Inconnu')
                         final_results.append(audit)
                         bar.progress((i+1)/len(cands))
+                    
+                    # --- CORRECTION DU SCORE VIA PYTHON (LE COUPERET) ---
+                    # C'est ici qu'on recalcule le score pour écraser celui de l'IA
+                    for r in final_results:
+                        sc_brut = r.get('scores', {}).get('global', 0)
+                        critiques = r.get('competences', {}).get('manquant_critique', [])
+                        secondaires = r.get('competences', {}).get('manquant_secondaire', [])
+                        red_flags = r.get('analyse', {}).get('red_flags', [])
+                        
+                        final_sc = sc_brut
+                        
+                        # 1. RÈGLE CRITIQUE : Si un seul critique manque -> Max 35
+                        if len(critiques) > 0:
+                            final_sc = min(final_sc, 35)
+                        
+                        # 2. RÈGLE RED FLAGS : Si drapeaux rouges -> Max 55
+                        if len(red_flags) > 0:
+                            final_sc = min(final_sc, 55)
+                        
+                        # 3. RÈGLE DEGRESSIVE : -5 points par manque secondaire
+                        if len(secondaires) > 0:
+                            final_sc -= (len(secondaires) * 5)
+                        
+                        # Pas de négatif
+                        final_sc = max(0, final_sc)
+                        
+                        # Mise à jour du score dans l'objet
+                        r['scores']['global'] = final_sc
+
+                    # Fin correction
                     
                     status.update(label="Analyse Terminée", state="complete")
                     final_results.sort(key=lambda x: x.get('scores', {}).get('global', 0), reverse=True)
@@ -359,9 +372,9 @@ with tab_search:
                         
                         nom_candidat = infos.get('nom', 'Inconnu')
                         nom_fichier_titre = r.get('file_name_orig', 'Document')
-                        s_cls = "sc-good" if sc >= 75 else "sc-mid" if sc >= 50 else "sc-bad"
+                        s_cls = "sc-good" if sc >= 75 else "sc-mid" if sc >= 45 else "sc-bad"
                         
-                        with st.expander(f"📄 {nom_fichier_titre} — Score {sc}/100", expanded=(sc>=60)):
+                        with st.expander(f"📄 {nom_fichier_titre} — Score {sc}/100", expanded=(sc>=50)):
                             c_main, c_badge = st.columns([4, 1])
                             with c_main:
                                 st.markdown(f"<div class='name-title'>{nom_candidat}</div>", unsafe_allow_html=True)
@@ -378,13 +391,13 @@ with tab_search:
                                     for flag in red_flags: st.error(f"🚩 {flag}")
                                 
                                 manquants = competences.get('manquant_critique', [])
-                                if manquants: st.error(f"⛔ **Manquants :** {', '.join(manquants)}")
+                                if manquants: st.error(f"⛔ **Disqualification :** {', '.join(manquants)}")
                                 
                                 st.info(f"💡 **Verdict:** {analyse.get('verdict_auditeur', '...')}")
 
                             with c_badge:
                                 st.markdown(f"<div class='score-badge {s_cls}'>{sc}</div>", unsafe_allow_html=True)
-                                st.caption("Score Sévère")
+                                st.caption("Score Corrigé")
 
                             st.divider()
 
