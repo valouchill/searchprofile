@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v40.0 (BALANCED SCORING - JUSTE MILIEU)
+# AI Recruiter PRO — v41.0 (STABLE FIX - CALLBACK SYSTEM)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -15,7 +15,7 @@ from supabase import create_client, Client
 # -----------------------------
 # 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v40", layout="wide", page_icon="⚖️")
+st.set_page_config(page_title="AI Recruiter PRO v41", layout="wide", page_icon="⚖️")
 
 st.markdown("""
 <style>
@@ -91,7 +91,7 @@ class CandidateData(BaseModel):
     historique: List[dict] = []; entretien: List[dict] = []
     raw_response: str = "" 
     file_name_orig: str = "" 
-    penalty_log: str = "" # Pour afficher le détail du calcul
+    penalty_log: str = ""
 
 DEFAULT_DATA = CandidateData().dict(by_alias=True)
 
@@ -252,15 +252,23 @@ def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
         return safe_data
 
 # -----------------------------
-# 4. SESSION STATE
+# 4. SESSION STATE & CALLBACKS (FIXED)
 # -----------------------------
-if 'preload_ao' not in st.session_state: st.session_state.preload_ao = ""
+# Initialisation des clés si elles n'existent pas
+if 'input_ao' not in st.session_state: st.session_state.input_ao = ""
 if 'crit_input' not in st.session_state: st.session_state.crit_input = "" 
+
+# --- CALLBACK POUR CHARGER L'HISTORIQUE ---
+def charger_historique(ao_text, crit_text):
+    """Met à jour les inputs AVANT le rechargement de la page"""
+    st.session_state.input_ao = ao_text
+    st.session_state.crit_input = crit_text
+    st.toast("✅ Historique chargé ! Allez dans l'onglet Recherche.", icon="📜")
 
 # -----------------------------
 # 5. INTERFACE
 # -----------------------------
-st.title("⚖️ AI Recruiter PRO — V40 (Balanced Scoring)")
+st.title("⚖️ Projet Alten ")
 
 # --- TABS ---
 tab_search, tab_ingest, tab_manage, tab_history = st.tabs(["🔎 RECHERCHE", "📥 INGESTION CV", "🗄️ GESTION BDD", "📜 HISTORIQUE AO"])
@@ -273,7 +281,9 @@ with tab_search:
     with col_upload:
         st.subheader("1. L'Offre (AO)")
         ao_pdf = st.file_uploader("Fiche de Poste (PDF)", type="pdf")
-        ao_manual = st.text_area("Ou texte", height=150, value=st.session_state.preload_ao, key="input_ao")
+        
+        # Le Text Area est lié directement au session_state via 'key'
+        ao_manual = st.text_area("Ou texte", height=150, key="input_ao")
         
         if ao_pdf:
             txt = extract_pdf_safe(ao_pdf.read())
@@ -310,7 +320,8 @@ with tab_search:
     st.divider()
     
     if st.button("🚀 LANCER L'ANALYSE ÉQUILIBRÉE", type="primary"):
-        final_ao = ao_content if ao_content else st.session_state.get('input_ao', '')
+        # On priorise le PDF, sinon le texte manuel
+        final_ao = ao_content if ao_content else st.session_state.input_ao
 
         if not final_ao:
             st.error("⚠️ Texte de l'offre vide.")
@@ -335,8 +346,7 @@ with tab_search:
                         final_results.append(audit)
                         bar.progress((i+1)/len(cands))
                     
-                    # --- SCORING PONDÉRÉ (MALUS SYSTEM) ---
-                    # Au lieu de couper, on pénalise
+                    # --- SCORING PONDÉRÉ ---
                     for r in final_results:
                         sc_brut = r.get('scores', {}).get('global', 0)
                         critiques = r.get('competences', {}).get('manquant_critique', [])
@@ -344,20 +354,16 @@ with tab_search:
                         red_flags = r.get('analyse', {}).get('red_flags', [])
                         
                         penalty = 0
-                        # Poids des manques
-                        penalty += len(critiques) * 15  # -15 par dealbreaker manquant
-                        penalty += len(secondaires) * 5 # -5 par bonus manquant
-                        penalty += len(red_flags) * 10  # -10 par red flag
+                        penalty += len(critiques) * 15
+                        penalty += len(secondaires) * 5
+                        penalty += len(red_flags) * 10
                         
                         final_sc = sc_brut - penalty
                         if final_sc < 0: final_sc = 0
                         
-                        # Mise à jour
                         r['scores']['global'] = final_sc
-                        r['penalty_log'] = f"Base IA: {sc_brut} - Malus: {penalty} ({len(critiques)} Crit, {len(secondaires)} Sec, {len(red_flags)} Flags)"
+                        r['penalty_log'] = f"Base IA: {sc_brut} - Malus: {penalty}"
 
-                    # Fin correction
-                    
                     status.update(label="Analyse Terminée", state="complete")
                     final_results.sort(key=lambda x: x.get('scores', {}).get('global', 0), reverse=True)
                     
@@ -374,7 +380,6 @@ with tab_search:
                         nom_candidat = infos.get('nom', 'Inconnu')
                         nom_fichier_titre = r.get('file_name_orig', 'Document')
                         
-                        # Seuils ajustés pour le "Juste Milieu"
                         s_cls = "sc-good" if sc >= 70 else "sc-mid" if sc >= 50 else "sc-bad"
                         
                         with st.expander(f"📄 {nom_fichier_titre} — Score {sc}/100", expanded=(sc>=60)):
@@ -397,7 +402,6 @@ with tab_search:
                                 if manquants: st.error(f"⚠️ **Attention :** Manque de {', '.join(manquants)}")
                                 
                                 st.info(f"💡 **Verdict:** {analyse.get('verdict_auditeur', '...')}")
-                                # Affichage discret du calcul
                                 st.caption(f"ℹ️ *Calcul du score : {r.get('penalty_log', '')}*")
 
                             with c_badge:
@@ -514,7 +518,7 @@ with tab_history:
                     st.write("**Critères :**", h['criteria_used'])
             with col_res: st.markdown(f"**{h['results_count']}** profils")
             with col_act:
-                if st.button("♻️ Relancer", key=f"hist_{h['id']}"):
-                    st.session_state.preload_ao = h['query_text']
-                    st.session_state.crit_input = h['criteria_used']
-                    st.toast("AO Chargé ! Allez dans l'onglet Recherche.")
+                # UTILISATION DU CALLBACK POUR ÉVITER LE BUG STREAMLIT
+                st.button("♻️ Relancer", key=f"hist_{h['id']}", 
+                          on_click=charger_historique, 
+                          args=(h['query_text'], h['criteria_used']))
