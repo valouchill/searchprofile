@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v20.0 (Version Finale Stable)
+# AI Recruiter PRO — v21.0 (Architecture Hybride + UI Premium)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -13,27 +13,53 @@ from pypdf import PdfReader
 from supabase import create_client, Client
 
 # -----------------------------
-# 0. CONFIGURATION & STYLE
+# 0. CONFIGURATION & STYLE (UI Premium v17 Restored)
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v20", layout="wide", page_icon="🔍")
+st.set_page_config(page_title="AI Recruiter PRO v21", layout="wide", page_icon="🛡️")
 
 st.markdown("""
 <style>
-    :root { --primary:#2563eb; --bg:#f8fafc; }
-    .stApp { background: var(--bg); font-family: 'Inter', sans-serif; }
+    :root {
+        --primary:#2563eb; --bg-app:#f8fafc; --text-main:#0f172a; --border:#cbd5e1;
+        --score-good:#16a34a; --score-mid:#d97706; --score-bad:#dc2626;
+    }
+    .stApp { background: var(--bg-app); color: var(--text-main); font-family: 'Inter', sans-serif; }
     
-    /* STYLE BARRE DE RECHERCHE */
-    .stTextInput input { font-size: 1.2rem; padding: 10px; border-radius: 25px; border: 2px solid #e2e8f0; }
-    .stButton button { border-radius: 25px; padding: 0 30px; font-weight: bold; }
-    
-    /* CARDS RÉSULTATS */
-    .score-badge { font-size: 1.4rem; font-weight: 900; color: white; width: 50px; height: 50px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
-    .sc-good { background: #16a34a; } .sc-mid { background: #d97706; } .sc-bad { background: #dc2626; }
+    /* INPUTS SEARCH ENGINE */
+    .stTextInput input { font-size: 1.1rem; padding: 12px; border-radius: 12px; border: 2px solid #e2e8f0; }
+    .stButton button { border-radius: 12px; font-weight: 700; height: 50px; }
+
+    /* TYPOGRAPHY CARD */
+    .name-title { font-size: 1.5rem; font-weight: 800; color: #1e293b; margin: 0; }
+    .job-subtitle { font-size: 0.95rem; color: #64748b; margin-top: 4px; font-weight: 500; }
+    .section-header { font-size: 0.85rem; text-transform: uppercase; color: #94a3b8; font-weight: 700; margin-bottom: 10px; letter-spacing: 0.5px; margin-top: 10px;}
+
+    /* SCORE BADGE */
+    .score-badge { 
+        font-size: 1.8rem; font-weight: 900; color: white; 
+        width: 70px; height: 70px; border-radius: 16px; 
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    .sc-good { background: linear-gradient(135deg, #16a34a, #15803d); }
+    .sc-mid { background: linear-gradient(135deg, #d97706, #b45309); }
+    .sc-bad { background: linear-gradient(135deg, #dc2626, #b91c1c); }
+
+    /* EVIDENCE BOXES */
+    .evidence-box { background: #f8fafc; border-left: 4px solid #cbd5e1; padding: 12px 15px; margin-bottom: 10px; border-radius: 0 6px 6px 0; }
+    .ev-skill { font-weight: 700; color: #334155; font-size: 0.95rem; }
+    .ev-proof { font-size: 0.9rem; color: #475569; font-style: italic; margin-top: 4px; }
+    .ev-missing { border-left-color: #ef4444; background: #fef2f2; }
+    .ev-missing .ev-skill { color: #991b1b; }
+
+    /* TAGS */
+    .tag { display: inline-block; padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; margin-right: 6px; margin-bottom: 6px; }
+    .tag-blue { background: #eff6ff; color: #1d4ed8; border: 1px solid #dbeafe; }
 </style>
 """, unsafe_allow_html=True)
 
 # -----------------------------
-# 1. CONNEXIONS SÉCURISÉES
+# 1. CONNEXIONS
 # -----------------------------
 @st.cache_resource
 def init_connections():
@@ -47,13 +73,13 @@ def init_connections():
         
         return supabase, openai_client, groq_client
     except Exception as e:
-        st.error(f"⚠️ Erreur Connexion Secrets : {e}")
+        st.error(f"⚠️ Erreur Connexion : {e}")
         return None, None, None
 
 supabase, openai_client, groq_client = init_connections()
 
 # -----------------------------
-# 2. MODELS DE DONNÉES (STRUCTURE)
+# 2. MODELS DE DONNÉES
 # -----------------------------
 class Infos(BaseModel):
     nom: str = "Candidat Inconnu"; email: str = "N/A"; tel: str = "N/A"; ville: str = ""; linkedin: str = ""; poste_actuel: str = ""
@@ -70,19 +96,25 @@ class Competences(BaseModel):
 class Analyse(BaseModel):
     verdict_auditeur: str = "En attente"; red_flags: List[str] = []
 
+class HistoriqueItem(BaseModel):
+    titre: str; entreprise: str; duree: str; contexte: str
+
+class QuestionItem(BaseModel):
+    cible: str; question: str; reponse_attendue: str
+
 class CandidateData(BaseModel):
     infos: Infos = Infos()
     scores: Scores = Scores()
     analyse: Analyse = Analyse()
     competences: Competences = Competences()
-    historique: List[dict] = []; entretien: List[dict] = []
+    historique: List[HistoriqueItem] = []
+    entretien: List[QuestionItem] = []
 
 DEFAULT_DATA = CandidateData().dict(by_alias=True)
 
 # -----------------------------
-# 3. FONCTIONS UTILITAIRES & ROBUSTES
+# 3. FONCTIONS LOGIQUES (ROBUSTES)
 # -----------------------------
-
 def clean_pdf_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text)
     return text[:8000]
@@ -94,210 +126,231 @@ def extract_pdf_safe(file_bytes: bytes) -> str:
         return clean_pdf_text(text)
     except: return ""
 
-# --- FONCTION EMBEDDING AVEC RETRY AUTOMATIQUE (Anti-Crash) ---
 def get_embedding(text: str) -> List[float]:
-    """Tente de vectoriser le texte. Réessaie si OpenAI bloque (Rate Limit)."""
+    """Vectorisation avec Retry"""
     text = text.replace("\n", " ")
-    max_retries = 3
-    
-    for attempt in range(max_retries):
+    for attempt in range(3):
         try:
             return openai_client.embeddings.create(input=[text], model="text-embedding-3-small").data[0].embedding
         except openai.RateLimitError:
-            wait = (attempt + 1) * 2
-            st.toast(f"⚠️ OpenAI Rate Limit. Pause de {wait}s...", icon="⏳")
-            time.sleep(wait)
-        except Exception as e:
-            st.error(f"Erreur OpenAI Critique: {e}")
-            st.stop()
-            
-    st.error("❌ Impossible de contacter OpenAI après 3 essais. Vérifiez vos crédits.")
+            time.sleep((attempt + 1) * 2)
+        except Exception:
+            break
+    st.error("❌ Erreur OpenAI. Vérifiez vos crédits.")
     st.stop()
 
 def ingest_cv_to_db(file, text):
-    """Envoie le CV et son vecteur dans Supabase"""
     vector = get_embedding(text)
     supabase.table('candidates').insert({
         "nom_fichier": file.name, "contenu_texte": text, "embedding": vector
     }).execute()
 
 def save_search_history(query, criteria, count):
-    """Sauvegarde l'AO dans l'historique"""
     try:
         supabase.table('search_history').insert({
             "query_text": query, "criteria_used": criteria, "results_count": count
         }).execute()
     except: pass
 
-# -----------------------------
-# 4. LE CERVEAU (AUDITEUR IA BLINDÉ)
-# -----------------------------
 AUDITOR_PROMPT = """
-ROLE: Auditeur de Recrutement.
-TACHE: Score CV vs RECHERCHE UTILISATEUR.
+ROLE: Auditeur de Recrutement Impitoyable.
+TACHE: Score CV vs RECHERCHE.
 REGLES:
 1. Si critère impératif absent = Score < 40.
-2. Structure JSON stricte requise.
+2. Structure JSON STRICTE (avec historique et entretien).
 """
 
 def audit_candidate_groq(query: str, cv: str, criteria: str) -> dict:
-    """Version crash-proof : utilise des valeurs par défaut si l'IA échoue"""
-    user_prompt = f"--- DEMANDE RECRUTEUR ---\n{query}\n\n--- CRITERES ---\n{criteria}\n\n--- CV ---\n{cv[:3500]}"
-    
-    # 1. Structure de secours
+    user_prompt = f"--- RECHERCHE ---\n{query}\n\n--- DEALBREAKERS ---\n{criteria}\n\n--- CV ---\n{cv[:3500]}"
     safe_data = deepcopy(DEFAULT_DATA)
-
     try:
-        # 2. Appel IA
         res = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": AUDITOR_PROMPT}, {"role": "user", "content": user_prompt}],
-            response_format={"type": "json_object"}, 
-            temperature=0.0
+            response_format={"type": "json_object"}, temperature=0.0
         )
-        
-        # 3. Parsing et Fusion sécurisée
         ai_json = json.loads(res.choices[0].message.content)
-        
+        # Fusion intelligente
         for key, value in ai_json.items():
             if key in safe_data and isinstance(safe_data[key], dict) and isinstance(value, dict):
-                safe_data[key].update(value) # Fusionne les sous-dictionnaires (infos, scores)
+                safe_data[key].update(value)
             else:
-                safe_data[key] = value # Remplace le reste (listes)
-                
+                safe_data[key] = value
+        return safe_data
+    except Exception:
         return safe_data
 
-    except Exception as e:
-        print(f"Erreur Audit: {e}")
-        return safe_data # Retourne la structure vide mais valide en cas de pépin
-
 # -----------------------------
-# 5. INTERFACE UTILISATEUR
+# 4. INTERFACE UTILISATEUR (UI PREMIUM)
 # -----------------------------
-st.title("🔍 Google of Recruitment")
+st.title("🛡️ AI Recruiter PRO — Intelligence Hub")
 
-# --- SIDEBAR : HISTORIQUE ---
+# --- SIDEBAR HISTORIQUE ---
 with st.sidebar:
-    st.header("🗂️ Mes Appels d'Offres")
+    st.header("🗂️ Derniers A.O.")
     if st.button("🔄 Rafraîchir"): st.rerun()
-    
     try:
-        # Récupération historique
-        history = supabase.table('search_history').select("*").order('created_at', desc=True).limit(8).execute()
-        for h in history.data:
+        hist = supabase.table('search_history').select("*").order('created_at', desc=True).limit(6).execute()
+        for h in hist.data:
             st.markdown(f"""
             <div style="padding:12px; background:white; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:8px;">
-                <div style="font-weight:600; font-size:0.9rem; color:#1e293b;">{h['query_text'][:35]}...</div>
-                <div style="font-size:0.75rem; color:#64748b; margin-top:4px;">
-                    🎯 {h['results_count']} profils • {h['created_at'][:10]}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-    except: st.caption("Historique vide ou erreur DB.")
+                <div style="font-weight:600; font-size:0.9rem; color:#1e293b;">{h['query_text'][:30]}...</div>
+                <div style="font-size:0.75rem; color:#64748b; margin-top:4px;">🎯 {h['results_count']} profils • {h['created_at'][:10]}</div>
+            </div>""", unsafe_allow_html=True)
+    except: st.caption("Historique vide.")
 
-# --- TABS PRINCIPAUX ---
-tab_search, tab_ingest = st.tabs(["🔎 RECHERCHER UN PROFIL", "📥 AJOUTER DES CVs"])
+# --- MAIN TABS ---
+tab_search, tab_ingest = st.tabs(["🔎 RECHERCHE & ANALYSE", "📥 INGESTION CV"])
 
 # --- ONGLET RECHERCHE ---
 with tab_search:
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # BARRE DE RECHERCHE
     col_bar, col_go = st.columns([6, 1])
     with col_bar:
-        search_query = st.text_input("Tapez votre besoin en langage naturel :", placeholder="Ex: Je cherche un Commercial B2B Expert SaaS qui parle Anglais...")
+        search_query = st.text_input("Votre besoin en langage naturel :", placeholder="Ex: Je cherche un Chef de Projet BTP avec 5 ans d'expérience...")
     with col_go:
-        st.write("") # Spacer visuel
         st.write("")
-        launch = st.button("RECHERCHER", type="primary", use_container_width=True)
+        st.write("")
+        launch = st.button("LANCER", type="primary", use_container_width=True)
 
-    # OPTIONS AVANCÉES
-    with st.expander("⚙️ Affiner les critères (Optionnel)"):
-        criteria = st.text_area("Critères Bloquants (Dealbreakers)", height=70)
+    with st.expander("⚙️ Critères & Options"):
+        criteria = st.text_area("Dealbreakers (Critères éliminatoires)", height=70)
         threshold = st.slider("Précision Sémantique", 0.3, 0.8, 0.45)
-        limit = st.number_input("Max CVs", 5, 50, 10)
+        limit = st.number_input("Max Profils", 5, 50, 10)
 
-    # RÉSULTATS
     if launch and search_query:
         st.divider()
-        with st.status("🚀 Lancement de la recherche...", expanded=True) as status:
+        with st.status("🧠 Analyse en cours...", expanded=True) as status:
             
             # 1. Vector Search
-            status.write("🧠 Compréhension de la demande...")
+            status.write("📐 Vectorisation & Matching...")
             q_vec = get_embedding(search_query)
-            
-            status.write("🗄️ Scan de la CV-Thèque...")
-            res_db = supabase.rpc('match_candidates', {
-                'query_embedding': q_vec, 'match_threshold': threshold, 'match_count': limit
-            }).execute()
-            
+            res_db = supabase.rpc('match_candidates', {'query_embedding': q_vec, 'match_threshold': threshold, 'match_count': limit}).execute()
             cands = res_db.data
             count = len(cands)
-            
-            # 2. Sauvegarde AO
-            status.write("💾 Création de l'Appel d'Offres...")
             save_search_history(search_query, criteria, count)
             
             if not cands:
                 status.update(label="❌ Aucun candidat trouvé.", state="error")
-                st.warning("Reformulez ou baissez la précision.")
             else:
-                status.write(f"✅ {count} Profils identifiés. Démarrage de l'Audit IA...")
+                status.write(f"✅ {count} profils identifiés. Audit approfondi...")
                 
-                # 3. Audit IA
+                # 2. Audit IA
                 final_results = []
                 bar = st.progress(0)
-                
                 for i, c in enumerate(cands):
-                    # Audit sécurisé
                     audit = audit_candidate_groq(search_query, c['contenu_texte'], criteria)
-                    
-                    # Fallback Nom Fichier si l'IA n'a pas trouvé le nom
-                    if audit['infos']['nom'] == "Candidat Inconnu": 
-                        audit['infos']['nom'] = c['nom_fichier']
-                    
+                    if audit['infos']['nom'] == "Candidat Inconnu": audit['infos']['nom'] = c['nom_fichier']
                     final_results.append(audit)
                     bar.progress((i+1)/count)
                 
-                status.update(label="🎉 Recherche terminée !", state="complete")
-                
-                # AFFICHAGE TRIÉ
+                status.update(label="🎉 Terminé !", state="complete")
                 final_results.sort(key=lambda x: x['scores']['global'], reverse=True)
                 
-                st.subheader(f"Résultats pour : {search_query}")
+                # --- AFFICHAGE PREMIUM (STYLE V17) ---
+                st.subheader(f"Résultats de l'AO : {search_query}")
+                
                 for r in final_results:
                     sc = r['scores']['global']
-                    color = "sc-good" if sc >= 70 else "sc-mid" if sc >= 50 else "sc-bad"
+                    s_cls = "sc-good" if sc >= 70 else "sc-mid" if sc >= 50 else "sc-bad"
                     
-                    with st.expander(f"{r['infos']['nom']} — {sc}/100", expanded=(sc>=60)):
-                        c1, c2 = st.columns([4, 1])
-                        with c1:
-                            st.markdown(f"**Verdict:** {r['analyse']['verdict_auditeur']}")
-                            if r['competences']['manquant_critique']:
-                                st.error(f"Manque: {', '.join(r['competences']['manquant_critique'])}")
+                    with st.expander(f"{r['infos']['nom']} — Score {sc}/100", expanded=(sc>=60)):
+                        
+                        # EN-TÊTE RICHE
+                        c_main, c_badge = st.columns([4, 1])
+                        with c_main:
+                            st.markdown(f"<div class='name-title'>{r['infos']['nom']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='job-subtitle'>{r['infos']['poste_actuel']} • {r['infos']['ville']}</div>", unsafe_allow_html=True)
                             
-                            # Petits badges skills
+                            # Tags Contact
+                            st.markdown(f"""
+                            <div style='margin-top:10px;'>
+                                <span class='tag tag-blue'>✉️ {r['infos']['email']}</span>
+                                <span class='tag tag-blue'>📱 {r['infos']['tel']}</span>
+                                <span class='tag tag-blue'><a href='{r['infos']['linkedin']}' target='_blank'>LinkedIn</a></span>
+                            </div>""", unsafe_allow_html=True)
+
+                            # Verdict & Alertes
+                            if r['analyse']['red_flags']:
+                                for flag in r['analyse']['red_flags']: st.error(f"🚩 {flag}")
+                            if r['competences']['manquant_critique']:
+                                st.error(f"⛔ **DISQUALIFIÉ :** Manque de {', '.join(r['competences']['manquant_critique'])}")
+                            
+                            st.info(f"💡 **Avis Auditeur :** {r['analyse']['verdict_auditeur']}")
+
+                        with c_badge:
+                            st.markdown(f"<div class='score-badge {s_cls}'>{sc}</div>", unsafe_allow_html=True)
+                            st.caption("Score Fiabilité")
+
+                        st.divider()
+
+                        # COLONNES PREUVES vs MANQUES
+                        col_match, col_miss = st.columns(2)
+                        with col_match:
+                            st.markdown("<div class='section-header'>✅ Compétences Prouvées</div>", unsafe_allow_html=True)
                             if r['competences']['match_details']:
-                                s_list = [f"`{x['skill']}`" for x in r['competences']['match_details'][:4]]
-                                st.markdown("Skills: " + " ".join(s_list))
-                                
-                        with c2:
-                            st.markdown(f"<div class='score-badge {color}'>{sc}</div>", unsafe_allow_html=True)
+                                for item in r['competences']['match_details']:
+                                    # Gestion safe des dictionnaires
+                                    if isinstance(item, dict):
+                                        skill, niveau, preuve = item.get('skill',''), item.get('niveau',''), item.get('preuve','')
+                                    else: # Si objet Pydantic
+                                        skill, niveau, preuve = item.skill, item.niveau, item.preuve
+                                        
+                                    st.markdown(f"""
+                                    <div class='evidence-box'>
+                                        <div class='ev-skill'>{skill} <span style='font-weight:400; color:#64748b;'>({niveau})</span></div>
+                                        <div class='ev-proof'>"{preuve}"</div>
+                                    </div>""", unsafe_allow_html=True)
+                            else: st.caption("Aucune preuve solide trouvée.")
+
+                        with col_miss:
+                            st.markdown("<div class='section-header'>❌ Points Manquants</div>", unsafe_allow_html=True)
+                            if r['competences']['manquant_critique']:
+                                for m in r['competences']['manquant_critique']:
+                                    st.markdown(f"""
+                                    <div class='evidence-box ev-missing'>
+                                        <div class='ev-skill'>CRITIQUE : {m}</div>
+                                        <div class='ev-proof'>Absence totale détectée.</div>
+                                    </div>""", unsafe_allow_html=True)
+                            
+                            if r['competences']['manquant_secondaire']:
+                                st.markdown("**Secondaires :** " + ", ".join([f"<span style='color:#64748b'>{x}</span>" for x in r['competences']['manquant_secondaire']]), unsafe_allow_html=True)
+
+                        st.divider()
+
+                        # HISTORIQUE & QUESTIONS
+                        c_hist, c_quest = st.columns(2)
+                        with c_hist:
+                            st.markdown("<div class='section-header'>📅 Parcours</div>", unsafe_allow_html=True)
+                            if r['historique']:
+                                for h in r['historique'][:3]:
+                                    # Gestion safe Pydantic/Dict
+                                    if isinstance(h, dict): titre, ent, dur = h.get('titre',''), h.get('entreprise',''), h.get('duree','')
+                                    else: titre, ent, dur = h.titre, h.entreprise, h.duree
+                                    st.markdown(f"**{titre}** chez *{ent}*")
+                                    st.caption(f"{dur}")
+                        
+                        with c_quest:
+                            st.markdown("<div class='section-header'>🎤 Questions Entretien</div>", unsafe_allow_html=True)
+                            if r['entretien']:
+                                for q in r['entretien']:
+                                    if isinstance(q, dict): quest, rep = q.get('question',''), q.get('reponse_attendue','')
+                                    else: quest, rep = q.question, q.reponse_attendue
+                                    with st.expander(f"❓ Question suggérée"):
+                                        st.write(f"**Q:** {quest}")
+                                        st.caption(f"💡 Attendu : {rep}")
 
 # --- ONGLET INGESTION ---
 with tab_ingest:
-    st.header("Alimenter la base")
+    st.header("Alimenter la CV-Thèque")
     files = st.file_uploader("PDFs", type="pdf", accept_multiple_files=True)
-    if st.button("Indexation Vectorielle") and files:
+    if st.button("Indexer") and files:
         bar = st.progress(0)
-        count_ok = 0
         for i, f in enumerate(files):
             try:
                 txt = extract_pdf_safe(f.read())
-                if len(txt) > 50: 
-                    ingest_cv_to_db(f, txt)
-                    count_ok += 1
-            except Exception as e:
-                st.toast(f"Erreur sur {f.name}")
+                if len(txt) > 50: ingest_cv_to_db(f, txt)
+            except: pass
             bar.progress((i+1)/len(files))
-        st.success(f"{count_ok} CVs indexés avec succès !")
+        st.success("Terminé !")
