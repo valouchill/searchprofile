@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v39.0 (SCORE OVERRIDE - Python Logic)
+# AI Recruiter PRO — v40.0 (BALANCED SCORING - JUSTE MILIEU)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -15,7 +15,7 @@ from supabase import create_client, Client
 # -----------------------------
 # 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v39", layout="wide", page_icon="📉")
+st.set_page_config(page_title="AI Recruiter PRO v40", layout="wide", page_icon="⚖️")
 
 st.markdown("""
 <style>
@@ -91,6 +91,7 @@ class CandidateData(BaseModel):
     historique: List[dict] = []; entretien: List[dict] = []
     raw_response: str = "" 
     file_name_orig: str = "" 
+    penalty_log: str = "" # Pour afficher le détail du calcul
 
 DEFAULT_DATA = CandidateData().dict(by_alias=True)
 
@@ -195,19 +196,26 @@ def extract_criteria_ai(ao_text: str) -> str:
     except Exception as e:
         return f"Erreur extraction: {e}"
 
-# --- PROMPT AUDIT ---
+# --- PROMPT AUDIT (JUSTE MILIEU) ---
 AUDITOR_PROMPT = """
-ROLE: Auditeur de Recrutement Factuel.
-TACHE: Identifier les compétences PRÉSENTES ou ABSENTES.
+ROLE: Auditeur de Recrutement (Précis & Juste).
+TACHE: Évaluer l'adéquation CV vs AO.
 
-INSTRUCTION CRUCIALE POUR LES LISTES :
-- Si un critère (Dealbreaker) est manquant, tu DOIS l'ajouter dans la liste "manquant_critique".
-- Si un critère secondaire est manquant, tu DOIS l'ajouter dans "manquant_secondaire".
+SCORING RULES (0-100) :
+- Sois objectif. Si le candidat a les compétences, donne les points.
+- Si une compétence est floue, sois prudent (score moyen).
+- Si une compétence est absente, mets-la dans la liste "manquant_critique".
+
+IMPORTANT :
+Le score global doit refléter le potentiel. 
+- 80+ : Excellent match.
+- 60-79 : Bon profil avec quelques manques.
+- < 60 : Profil trop juste ou hors sujet.
 
 STRUCTURE JSON :
 {
     "infos": { "nom": "...", "poste_actuel": "...", "email": "...", "tel": "...", "ville": "...", "linkedin": "..." },
-    "scores": { "global": int (Estimation), "tech": int, "experience": int, "fit": int },
+    "scores": { "global": int, "tech": int, "experience": int, "fit": int },
     "competences": {
         "match_details": [ {"skill": "...", "preuve": "...", "niveau": "..."} ],
         "manquant_critique": ["LISTE..."],
@@ -220,11 +228,11 @@ STRUCTURE JSON :
 """
 
 def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
-    user_prompt = f"AO: {ao_text[:2000]}... DEALBREAKERS: {criteria}... CV: {cv_text[:3500]}..."
+    user_prompt = f"AO: {ao_text[:2000]}... CRITERES: {criteria}... CV: {cv_text[:3500]}..."
     safe_data = deepcopy(DEFAULT_DATA)
     try:
         res = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="llama-3.3-70b-versatile", # Smart Model
             messages=[{"role": "system", "content": AUDITOR_PROMPT}, {"role": "user", "content": user_prompt}],
             temperature=0.0,
             response_format={"type": "json_object"} 
@@ -252,7 +260,7 @@ if 'crit_input' not in st.session_state: st.session_state.crit_input = ""
 # -----------------------------
 # 5. INTERFACE
 # -----------------------------
-st.title("📉 AI Recruiter PRO — V39 (Score Override)")
+st.title("⚖️ AI Recruiter PRO — V40 (Balanced Scoring)")
 
 # --- TABS ---
 tab_search, tab_ingest, tab_manage, tab_history = st.tabs(["🔎 RECHERCHE", "📥 INGESTION CV", "🗄️ GESTION BDD", "📜 HISTORIQUE AO"])
@@ -301,13 +309,13 @@ with tab_search:
     
     st.divider()
     
-    if st.button("🚀 LANCER L'AUDIT SÉVÈRE", type="primary"):
+    if st.button("🚀 LANCER L'ANALYSE ÉQUILIBRÉE", type="primary"):
         final_ao = ao_content if ao_content else st.session_state.get('input_ao', '')
 
         if not final_ao:
             st.error("⚠️ Texte de l'offre vide.")
         else:
-            with st.status("Recherche & Audit en cours...", expanded=True) as status:
+            with st.status("Recherche & Audit...", expanded=True) as status:
                 q_vec = get_embedding(final_ao[:8000])
                 res_db = supabase.rpc('match_candidates', {'query_embedding': q_vec, 'match_threshold': threshold, 'match_count': limit}).execute()
                 cands = res_db.data
@@ -317,7 +325,7 @@ with tab_search:
                 if not cands:
                     status.update(label="❌ 0 Candidat trouvé", state="error")
                 else:
-                    status.write(f"✅ {len(cands)} profils. Audit Sceptique...")
+                    status.write(f"✅ {len(cands)} profils. Audit Expert...")
                     final_results = []
                     bar = st.progress(0)
                     
@@ -327,33 +335,26 @@ with tab_search:
                         final_results.append(audit)
                         bar.progress((i+1)/len(cands))
                     
-                    # --- CORRECTION DU SCORE VIA PYTHON (LE COUPERET) ---
-                    # C'est ici qu'on recalcule le score pour écraser celui de l'IA
+                    # --- SCORING PONDÉRÉ (MALUS SYSTEM) ---
+                    # Au lieu de couper, on pénalise
                     for r in final_results:
                         sc_brut = r.get('scores', {}).get('global', 0)
                         critiques = r.get('competences', {}).get('manquant_critique', [])
                         secondaires = r.get('competences', {}).get('manquant_secondaire', [])
                         red_flags = r.get('analyse', {}).get('red_flags', [])
                         
-                        final_sc = sc_brut
+                        penalty = 0
+                        # Poids des manques
+                        penalty += len(critiques) * 15  # -15 par dealbreaker manquant
+                        penalty += len(secondaires) * 5 # -5 par bonus manquant
+                        penalty += len(red_flags) * 10  # -10 par red flag
                         
-                        # 1. RÈGLE CRITIQUE : Si un seul critique manque -> Max 35
-                        if len(critiques) > 0:
-                            final_sc = min(final_sc, 35)
+                        final_sc = sc_brut - penalty
+                        if final_sc < 0: final_sc = 0
                         
-                        # 2. RÈGLE RED FLAGS : Si drapeaux rouges -> Max 55
-                        if len(red_flags) > 0:
-                            final_sc = min(final_sc, 55)
-                        
-                        # 3. RÈGLE DEGRESSIVE : -5 points par manque secondaire
-                        if len(secondaires) > 0:
-                            final_sc -= (len(secondaires) * 5)
-                        
-                        # Pas de négatif
-                        final_sc = max(0, final_sc)
-                        
-                        # Mise à jour du score dans l'objet
+                        # Mise à jour
                         r['scores']['global'] = final_sc
+                        r['penalty_log'] = f"Base IA: {sc_brut} - Malus: {penalty} ({len(critiques)} Crit, {len(secondaires)} Sec, {len(red_flags)} Flags)"
 
                     # Fin correction
                     
@@ -372,9 +373,11 @@ with tab_search:
                         
                         nom_candidat = infos.get('nom', 'Inconnu')
                         nom_fichier_titre = r.get('file_name_orig', 'Document')
-                        s_cls = "sc-good" if sc >= 75 else "sc-mid" if sc >= 45 else "sc-bad"
                         
-                        with st.expander(f"📄 {nom_fichier_titre} — Score {sc}/100", expanded=(sc>=50)):
+                        # Seuils ajustés pour le "Juste Milieu"
+                        s_cls = "sc-good" if sc >= 70 else "sc-mid" if sc >= 50 else "sc-bad"
+                        
+                        with st.expander(f"📄 {nom_fichier_titre} — Score {sc}/100", expanded=(sc>=60)):
                             c_main, c_badge = st.columns([4, 1])
                             with c_main:
                                 st.markdown(f"<div class='name-title'>{nom_candidat}</div>", unsafe_allow_html=True)
@@ -391,19 +394,21 @@ with tab_search:
                                     for flag in red_flags: st.error(f"🚩 {flag}")
                                 
                                 manquants = competences.get('manquant_critique', [])
-                                if manquants: st.error(f"⛔ **Disqualification :** {', '.join(manquants)}")
+                                if manquants: st.error(f"⚠️ **Attention :** Manque de {', '.join(manquants)}")
                                 
                                 st.info(f"💡 **Verdict:** {analyse.get('verdict_auditeur', '...')}")
+                                # Affichage discret du calcul
+                                st.caption(f"ℹ️ *Calcul du score : {r.get('penalty_log', '')}*")
 
                             with c_badge:
                                 st.markdown(f"<div class='score-badge {s_cls}'>{sc}</div>", unsafe_allow_html=True)
-                                st.caption("Score Corrigé")
+                                st.caption("Score Final")
 
                             st.divider()
 
                             col_match, col_miss = st.columns(2)
                             with col_match:
-                                st.markdown("<div class='section-header'>✅ Preuves Trouvées</div>", unsafe_allow_html=True)
+                                st.markdown("<div class='section-header'>✅ Points Forts</div>", unsafe_allow_html=True)
                                 match_details = competences.get('match_details', [])
                                 if match_details:
                                     for item in match_details:
@@ -414,19 +419,19 @@ with tab_search:
                                             <div class='ev-skill'>{s} <span style='font-weight:400; color:#64748b;'>({n})</span></div>
                                             <div class='ev-proof'>"{p}"</div>
                                         </div>""", unsafe_allow_html=True)
-                                else: st.caption("Aucune preuve solide.")
+                                else: st.caption("Rien de notable.")
 
                             with col_miss:
-                                st.markdown("<div class='section-header'>❌ Points d'Attention</div>", unsafe_allow_html=True)
+                                st.markdown("<div class='section-header'>❌ Points Manquants</div>", unsafe_allow_html=True)
                                 if manquants:
                                     for m in manquants:
                                         st.markdown(f"""
                                         <div class='evidence-box ev-missing'>
                                             <div class='ev-skill' style='color:#b91c1c;'>CRITIQUE : {m}</div>
-                                            <div class='ev-proof'>Absence totale ou floue.</div>
+                                            <div class='ev-proof'>Absence (-15 pts)</div>
                                         </div>""", unsafe_allow_html=True)
                                 secs = competences.get('manquant_secondaire', [])
-                                if secs: st.markdown("**Secondaires :** " + ", ".join([f"<span style='color:#64748b'>{x}</span>" for x in secs]), unsafe_allow_html=True)
+                                if secs: st.markdown("**Secondaires (-5 pts) :** " + ", ".join([f"<span style='color:#64748b'>{x}</span>" for x in secs]), unsafe_allow_html=True)
 
                             st.divider()
 
@@ -440,7 +445,7 @@ with tab_search:
                                         st.markdown(f"**{t}** chez *{e}*")
                                         st.caption(f"{d}")
                             with c_quest:
-                                st.markdown("<div class='section-header'>🎤 Questions Pièges</div>", unsafe_allow_html=True)
+                                st.markdown("<div class='section-header'>🎤 Questions</div>", unsafe_allow_html=True)
                                 if entretien:
                                     for q in entretien:
                                         if isinstance(q, dict): qu, re = q.get('question',''), q.get('reponse_attendue','')
