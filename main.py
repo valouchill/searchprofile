@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v29.0 (JSON RESCUE EDITION)
+# AI Recruiter PRO — v30.0 (V17 DESIGN + V29 ENGINE)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -13,23 +13,48 @@ from pypdf import PdfReader
 from supabase import create_client, Client
 
 # -----------------------------
-# 0. CONFIGURATION & STYLE
+# 0. CONFIGURATION & STYLE (DESIGN V17 RESTAURÉ)
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v29", layout="wide", page_icon="🛡️")
+st.set_page_config(page_title="AI Recruiter PRO v30", layout="wide", page_icon="💎")
 
 st.markdown("""
 <style>
-    :root { --primary:#dc2626; --bg-app:#f8fafc; --text-main:#0f172a; }
-    .stApp { background: var(--bg-app); color: var(--text-main); font-family: 'Inter', sans-serif; }
-    .stButton button { border-radius: 8px; font-weight: 700; height: 45px; }
-    .score-badge { 
-        font-size: 1.6rem; font-weight: 900; color: white; 
-        width: 65px; height: 65px; border-radius: 14px; 
-        display: flex; align-items: center; justify-content: center;
+    :root {
+        --primary:#2563eb; --bg-app:#f8fafc; --text-main:#0f172a; --border:#cbd5e1;
+        --score-good:#16a34a; --score-mid:#d97706; --score-bad:#dc2626;
     }
-    .sc-good { background: #16a34a; } .sc-mid { background: #d97706; } .sc-bad { background: #dc2626; }
-    .evidence-box { background: #fff; border-left: 4px solid #cbd5e1; padding: 10px; margin-bottom: 8px; }
+    .stApp { background: var(--bg-app); color: var(--text-main); font-family: 'Inter', sans-serif; }
+    
+    /* INPUTS */
+    .stTextInput input, .stTextArea textarea { border-radius: 12px; border: 2px solid #e2e8f0; }
+    .stButton button { border-radius: 12px; font-weight: 700; height: 50px; }
+
+    /* TYPOGRAPHY CARD */
+    .name-title { font-size: 1.6rem; font-weight: 800; color: #1e293b; margin: 0; line-height: 1.2; }
+    .job-subtitle { font-size: 0.95rem; color: #64748b; margin-top: 4px; font-weight: 500; }
+    .section-header { font-size: 0.85rem; text-transform: uppercase; color: #94a3b8; font-weight: 700; margin-bottom: 10px; letter-spacing: 0.5px; margin-top: 15px;}
+
+    /* SCORE BADGE V17 STYLE */
+    .score-badge { 
+        font-size: 2rem; font-weight: 900; color: white; 
+        width: 80px; height: 80px; border-radius: 16px; 
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 4px 10px -1px rgba(0, 0, 0, 0.2);
+    }
+    .sc-good { background: linear-gradient(135deg, #16a34a, #15803d); }
+    .sc-mid { background: linear-gradient(135deg, #d97706, #b45309); }
+    .sc-bad { background: linear-gradient(135deg, #dc2626, #991b1b); }
+
+    /* EVIDENCE BOXES */
+    .evidence-box { background: #f8fafc; border-left: 4px solid #cbd5e1; padding: 12px 15px; margin-bottom: 8px; border-radius: 0 8px 8px 0; }
+    .ev-skill { font-weight: 700; color: #334155; font-size: 0.95rem; }
+    .ev-proof { font-size: 0.9rem; color: #475569; font-style: italic; margin-top: 4px; }
     .ev-missing { border-left-color: #ef4444; background: #fff1f2; }
+    .ev-missing .ev-skill { color: #991b1b; }
+
+    /* TAGS */
+    .tag { display: inline-block; padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; margin-right: 6px; margin-bottom: 6px; }
+    .tag-blue { background: #eff6ff; color: #1d4ed8; border: 1px solid #dbeafe; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -81,7 +106,7 @@ class CandidateData(BaseModel):
 DEFAULT_DATA = CandidateData().dict(by_alias=True)
 
 # -----------------------------
-# 3. FONCTIONS LOGIQUES
+# 3. FONCTIONS LOGIQUES (V29 ROBUSTE)
 # -----------------------------
 def clean_pdf_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text)
@@ -112,37 +137,33 @@ def ingest_cv_to_db(file, text):
         "nom_fichier": file.name, "contenu_texte": text, "embedding": vector
     }).execute()
 
-# --- NETTOYEUR DE JSON (LE SAUVEUR) ---
+# --- NETTOYEUR JSON ---
 def clean_json_string(text: str) -> str:
-    """Enlève le markdown ```json ... ``` et les commentaires"""
-    # Enlever les balises code markdown
     text = re.sub(r'```json', '', text)
     text = re.sub(r'```', '', text)
-    # Chercher le premier { et le dernier }
     start = text.find('{')
     end = text.rfind('}') + 1
-    if start != -1 and end != -1:
-        return text[start:end]
+    if start != -1 and end != -1: return text[start:end]
     return text
 
 def safe_json_loads(text: str) -> Dict:
-    """Tente de charger le JSON même s'il est sale"""
     cleaned = clean_json_string(text)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        return None
+    try: return json.loads(cleaned)
+    except: return None
 
-# --- PROMPT SIMPLIFIÉ POUR LLAMA 8B ---
+# --- PROMPT V29 (ECO FRIENDLY) ---
 AUDITOR_PROMPT = """
-Tu es un recruteur expert. Analyse le CV par rapport à l'offre (AO).
-Règles:
-1. Si un critère critique manque, score < 30.
-2. Si le CV est bon, score > 70.
-3. REPONDS UNIQUEMENT AVEC LE JSON CI-DESSOUS. RIEN D'AUTRE.
+Tu es un recruteur expert.
+TACHE: Analyser CV vs AO.
+IMPORTANT: REPONDS UNIQUEMENT AVEC LE JSON.
 
+SCORING RULES (0-100):
+- Dealbreaker manquant = Score < 30.
+- Excellent = > 80.
+
+STRUCTURE JSON:
 {
-    "infos": { "nom": "Nom trouvé ou Inconnu", "poste_actuel": "..." },
+    "infos": { "nom": "...", "poste_actuel": "...", "email": "...", "tel": "...", "ville": "...", "linkedin": "..." },
     "scores": { "global": 0, "tech": 0, "experience": 0, "fit": 0 },
     "competences": {
         "match_details": [ {"skill": "...", "preuve": "...", "niveau": "..."} ],
@@ -156,51 +177,37 @@ Règles:
 """
 
 def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
-    # On réduit le contexte pour économiser des tokens
     user_prompt = f"AO: {ao_text[:1000]}... CRITERES: {criteria}... CV: {cv_text[:1500]}..."
-    
     safe_data = deepcopy(DEFAULT_DATA)
-    
     try:
         res = groq_client.chat.completions.create(
-            # Modèle léger
-            model="llama-3.1-8b-instant", 
+            model="llama-3.1-8b-instant", # Eco Model
             messages=[{"role": "system", "content": AUDITOR_PROMPT}, {"role": "user", "content": user_prompt}],
             temperature=0.0,
-            # Force JSON Mode (Important pour Llama 3.1)
             response_format={"type": "json_object"} 
         )
-        
         raw_content = res.choices[0].message.content
         safe_data['raw_response'] = raw_content
         
-        # Tentative de parsing robuste
         ai_json = safe_json_loads(raw_content)
-        
         if ai_json:
             for key, value in ai_json.items():
                 if key in safe_data and isinstance(safe_data[key], dict) and isinstance(value, dict):
                     safe_data[key].update(value)
                 else: safe_data[key] = value
-        else:
-             safe_data['analyse']['verdict_auditeur'] = "Erreur JSON: L'IA a mal formaté la réponse."
-
-        return safe_data
-        
-    except openai.RateLimitError:
-        safe_data['analyse']['verdict_auditeur'] = "⚠️ Erreur 429: Quota Groq dépassé."
+        else: safe_data['analyse']['verdict_auditeur'] = "Erreur JSON (Voir Debug)"
         return safe_data
     except Exception as e:
-        safe_data['analyse']['verdict_auditeur'] = f"Erreur: {str(e)}"
+        safe_data['analyse']['verdict_auditeur'] = f"Erreur API: {str(e)}"
         return safe_data
 
 # -----------------------------
 # 4. INTERFACE
 # -----------------------------
-st.title("🛡️ AI Recruiter PRO — V29 (JSON Fix)")
+st.title("💎 AI Recruiter PRO — Ultimate Design")
 
 # --- TABS ---
-tab_search, tab_ingest = st.tabs(["🔎 AUDIT", "📥 INGESTION"])
+tab_search, tab_ingest = st.tabs(["🔎 RECHERCHE & ANALYSE", "📥 INGESTION CV"])
 
 # --- ONGLET 1 : RECHERCHE ---
 with tab_search:
@@ -221,18 +228,18 @@ with tab_search:
         elif ao_manual: ao_content = ao_manual
 
     with col_criteria:
-        st.subheader("2. Critères")
-        criteria = st.text_area("Dealbreakers", height=100)
+        st.subheader("2. Paramètres")
+        criteria = st.text_area("Dealbreakers (Points Bloquants)", height=100)
         threshold = st.slider("Seuil Matching", 0.3, 0.8, 0.45)
         limit = st.number_input("Nb Profils", 1, 20, 5)
     
     st.divider()
     
-    if st.button("🚀 LANCER L'AUDIT", type="primary"):
+    if st.button("🚀 LANCER L'ANALYSE", type="primary"):
         if not ao_content:
             st.error("⚠️ Texte de l'offre vide.")
         else:
-            with st.status("Traitement...", expanded=True) as status:
+            with st.status("Traitement en cours...", expanded=True) as status:
                 q_vec = get_embedding(ao_content[:8000])
                 res_db = supabase.rpc('match_candidates', {'query_embedding': q_vec, 'match_threshold': threshold, 'match_count': limit}).execute()
                 cands = res_db.data
@@ -240,7 +247,7 @@ with tab_search:
                 if not cands:
                     status.update(label="❌ 0 Candidat trouvé", state="error")
                 else:
-                    status.write(f"✅ {len(cands)} profils. Analyse IA...")
+                    status.write(f"✅ {len(cands)} profils identifiés. Audit IA (Eco-Mode)...")
                     final_results = []
                     bar = st.progress(0)
                     
@@ -250,34 +257,119 @@ with tab_search:
                         infos = audit.get('infos', {})
                         if not infos.get('nom') or infos.get('nom') == "Candidat Inconnu":
                             if 'infos' not in audit: audit['infos'] = {}
-                            audit['infos']['nom'] = c.get('nom_fichier', 'Fichier')
+                            audit['infos']['nom'] = c.get('nom_fichier', 'Fichier Sans Nom')
                             
                         final_results.append(audit)
                         bar.progress((i+1)/len(cands))
                     
-                    status.update(label="Terminé", state="complete")
+                    status.update(label="Analyse Terminée", state="complete")
                     final_results.sort(key=lambda x: x.get('scores', {}).get('global', 0), reverse=True)
                     
-                    st.subheader("Résultats")
+                    st.subheader(f"Résultats ({len(final_results)})")
                     
+                    # --- AFFICHAGE STYLE V17 (PREMIUM) ---
                     for i, r in enumerate(final_results):
                         sc = r.get('scores', {}).get('global', 0)
-                        nom = r.get('infos', {}).get('nom', 'Inconnu')
+                        infos = r.get('infos', {})
+                        analyse = r.get('analyse', {})
+                        competences = r.get('competences', {})
+                        historique = r.get('historique', [])
+                        entretien = r.get('entretien', [])
+                        nom = infos.get('nom', 'Inconnu')
                         
-                        # CLÉ UNIQUE POUR DEBUG
-                        with st.expander(f"{nom} — Score {sc}/100", expanded=(sc>=0)):
+                        # Code couleur
+                        s_cls = "sc-good" if sc >= 70 else "sc-mid" if sc >= 40 else "sc-bad"
+                        
+                        with st.expander(f"{nom} — Score {sc}/100", expanded=(sc>=60)):
                             
-                            # DEBUG: Afficher la réponse brute si JSON invalide
-                            if "Erreur JSON" in r['analyse'].get('verdict_auditeur', ''):
-                                st.error("L'IA a renvoyé du texte invalide. Voici le contenu brut :")
-                                st.text_area("Raw", r.get('raw_response', ''), height=100, key=f"bug_{i}")
+                            # EN-TÊTE RICHE (Style V17)
+                            c_main, c_badge = st.columns([4, 1])
+                            with c_main:
+                                st.markdown(f"<div class='name-title'>{nom}</div>", unsafe_allow_html=True)
+                                st.markdown(f"<div class='job-subtitle'>{infos.get('poste_actuel', '')} • {infos.get('ville', '')}</div>", unsafe_allow_html=True)
+                                
+                                # Tags
+                                st.markdown(f"""
+                                <div style='margin-top:10px;'>
+                                    <span class='tag tag-blue'>✉️ {infos.get('email', 'N/A')}</span>
+                                    <span class='tag tag-blue'>📱 {infos.get('tel', 'N/A')}</span>
+                                    <span class='tag tag-blue'><a href='{infos.get('linkedin', '#')}' target='_blank'>LinkedIn</a></span>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                
+                                # Verdict & Red Flags
+                                red_flags = analyse.get('red_flags', [])
+                                if red_flags:
+                                    for flag in red_flags: st.error(f"🚩 {flag}")
+                                
+                                manquants = competences.get('manquant_critique', [])
+                                if manquants: st.error(f"⛔ **Manquants :** {', '.join(manquants)}")
+                                
+                                st.info(f"💡 **Avis:** {analyse.get('verdict_auditeur', '...')}")
+
+                            with c_badge:
+                                st.markdown(f"<div class='score-badge {s_cls}'>{sc}</div>", unsafe_allow_html=True)
+                                st.caption("Score Fiabilité")
+
+                            st.divider()
+
+                            # COLONNES PREUVES (Style V17)
+                            col_match, col_miss = st.columns(2)
+                            with col_match:
+                                st.markdown("<div class='section-header'>✅ Points Forts Validés</div>", unsafe_allow_html=True)
+                                match_details = competences.get('match_details', [])
+                                if match_details:
+                                    for item in match_details:
+                                        if isinstance(item, dict): s, n, p = item.get('skill',''), item.get('niveau',''), item.get('preuve','')
+                                        else: s, n, p = item.skill, item.niveau, item.preuve
+                                        st.markdown(f"""
+                                        <div class='evidence-box'>
+                                            <div class='ev-skill'>{s} <span style='font-weight:400; color:#64748b;'>({n})</span></div>
+                                            <div class='ev-proof'>"{p}"</div>
+                                        </div>""", unsafe_allow_html=True)
+                                else: st.caption("Rien de notable.")
+
+                            with col_miss:
+                                st.markdown("<div class='section-header'>❌ Lacunes & Risques</div>", unsafe_allow_html=True)
+                                if manquants:
+                                    for m in manquants:
+                                        st.markdown(f"""
+                                        <div class='evidence-box ev-missing'>
+                                            <div class='ev-skill' style='color:#b91c1c;'>CRITIQUE : {m}</div>
+                                            <div class='ev-proof'>Absence totale détectée.</div>
+                                        </div>""", unsafe_allow_html=True)
+                                
+                                secs = competences.get('manquant_secondaire', [])
+                                if secs: st.markdown("**Secondaires :** " + ", ".join([f"<span style='color:#64748b'>{x}</span>" for x in secs]), unsafe_allow_html=True)
+
+                            st.divider()
+
+                            # HISTORIQUE & QUESTIONS
+                            c_hist, c_quest = st.columns(2)
+                            with c_hist:
+                                st.markdown("<div class='section-header'>📅 Parcours</div>", unsafe_allow_html=True)
+                                if historique:
+                                    for h in historique[:3]:
+                                        if isinstance(h, dict): t, e, d = h.get('titre',''), h.get('entreprise',''), h.get('duree','')
+                                        else: t, e, d = h.titre, h.entreprise, h.duree
+                                        st.markdown(f"**{t}** chez *{e}*")
+                                        st.caption(f"{d}")
                             
-                            c1, c2 = st.columns([4, 1])
-                            c1.info(r['analyse'].get('verdict_auditeur'))
-                            c2.metric("Score", sc)
+                            with c_quest:
+                                st.markdown("<div class='section-header'>🎤 Questions Entretien</div>", unsafe_allow_html=True)
+                                if entretien:
+                                    for q in entretien:
+                                        if isinstance(q, dict): qu, re = q.get('question',''), q.get('reponse_attendue','')
+                                        else: qu, re = q.question, q.reponse_attendue
+                                        with st.expander("❓ Question suggérée"):
+                                            st.write(f"**Q:** {qu}")
+                                            st.caption(f"💡 Attendu : {re}")
                             
-                            manq = r.get('competences', {}).get('manquant_critique', [])
-                            if manq: c1.error(f"Manques : {manq}")
+                            # DEBUG SAFE ZONE
+                            if "Erreur" in str(analyse.get('verdict_auditeur', '')):
+                                st.divider()
+                                st.warning("Debug JSON (L'IA a eu du mal)")
+                                st.text_area("Raw", r.get('raw_response', ''), height=100, key=f"debug_{i}")
 
 # --- ONGLET 2 : INGESTION ---
 with tab_ingest:
