@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v35.0 (AUTO-EXTRACTION CRITÈRES + SMART MODEL)
+# AI Recruiter PRO — v36.0 (FIX BOUTON EXTRACTION)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -15,7 +15,7 @@ from supabase import create_client, Client
 # -----------------------------
 # 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v35", layout="wide", page_icon="🧠")
+st.set_page_config(page_title="AI Recruiter PRO v36", layout="wide", page_icon="🧠")
 
 st.markdown("""
 <style>
@@ -138,7 +138,6 @@ def ingest_cv_to_db(file, text):
         "nom_fichier": file.name, "contenu_texte": text, "embedding": vector
     }).execute()
 
-# --- NETTOYEUR JSON ---
 def clean_json_string(text: str) -> str:
     text = re.sub(r'```json', '', text)
     text = re.sub(r'```', '', text)
@@ -188,22 +187,24 @@ def save_search_history(query, criteria, count):
         }).execute()
     except: pass
 
-# --- NOUVEAU : AUTO-EXTRACTION CRITERES ---
+# --- AUTO-EXTRACTION CRITERES (FIXED) ---
 def extract_criteria_ai(ao_text: str) -> str:
-    """Demande à l'IA d'extraire les dealbreakers de l'AO"""
     prompt = f"""
-    Agis comme un expert en recrutement. Lis cette offre d'emploi et extrais :
-    1. Les CRITÈRES IMPÉRATIFS (Dealbreakers - Diplôme, Langue, Années d'exp, Compétence Tech clé).
-    2. Les CRITÈRES SECONDAIRES (Nice to have, Soft skills).
+    Agis comme un expert en recrutement. Lis cette offre d'emploi et extrais les critères sous ce format exact :
     
-    Réponds sous forme de liste à puces concise.
+    1. IMPÉRATIFS (DEALBREAKERS) :
+    - ...
+    - ...
+    
+    2. SECONDAIRES (BONUS) :
+    - ...
     
     OFFRE :
     {ao_text[:3000]}
     """
     try:
         res = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant", # Rapide et suffisant pour ça
+            model="llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1
         )
@@ -220,7 +221,7 @@ INSTRUCTION: Renvoie UNIQUEMENT du JSON valide. Sois précis et exigeant.
 SCORING RULES (0-100):
 - Si critère critique manquant = Score < 30.
 - Si excellent profil = > 80.
-- Analyse les synonymes et le contexte (ex: Vente = Négociation).
+- Analyse les synonymes et le contexte.
 
 STRUCTURE JSON REQUISE:
 {
@@ -242,7 +243,7 @@ def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
     safe_data = deepcopy(DEFAULT_DATA)
     try:
         res = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile", # Smart Model
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": AUDITOR_PROMPT}, {"role": "user", "content": user_prompt}],
             temperature=0.0,
             response_format={"type": "json_object"} 
@@ -266,12 +267,12 @@ def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
 # 4. SESSION STATE
 # -----------------------------
 if 'preload_ao' not in st.session_state: st.session_state.preload_ao = ""
-if 'criteria_val' not in st.session_state: st.session_state.criteria_val = ""
+if 'crit_input' not in st.session_state: st.session_state.crit_input = "" # Clé directe du widget
 
 # -----------------------------
 # 5. INTERFACE
 # -----------------------------
-st.title("🧠 Projet Alten — V35 (Auto-Detect)")
+st.title("🧠 AI Recruiter PRO — V36 (Extraction Fixed)")
 
 # --- TABS ---
 tab_search, tab_ingest, tab_manage, tab_history = st.tabs(["🔎 RECHERCHE", "📥 INGESTION CV", "🗄️ GESTION BDD", "📜 HISTORIQUE AO"])
@@ -286,45 +287,46 @@ with tab_search:
         ao_pdf = st.file_uploader("Fiche de Poste (PDF)", type="pdf")
         ao_manual = st.text_area("Ou texte", height=150, value=st.session_state.preload_ao, key="input_ao")
         
+        # Gestion du contenu AO
         if ao_pdf:
             txt = extract_pdf_safe(ao_pdf.read())
             if txt: 
                 ao_content = txt
                 st.success(f"✅ PDF lu ({len(txt)} chars)")
-                
-                # NOUVEAU : BOUTON EXTRACTION
-                if st.button("✨ Extraire les critères via IA", type="secondary"):
-                    with st.spinner("Analyse de l'offre..."):
-                        extracted = extract_criteria_ai(txt)
-                        st.session_state.criteria_val = extracted
-                        st.rerun()
             else: st.error("⚠️ PDF vide.")
         elif ao_manual: 
             ao_content = ao_manual
-            if st.button("✨ Extraire les critères via IA", type="secondary"):
-                 with st.spinner("Analyse du texte..."):
-                    extracted = extract_criteria_ai(ao_manual)
-                    st.session_state.criteria_val = extracted
+
+        # --- LE BOUTON FIXÉ ---
+        # Le bouton fonctionne si on a du contenu (soit PDF lu, soit texte manuel)
+        if st.button("✨ Extraire les critères via IA", type="secondary"):
+            if not ao_content:
+                st.error("❌ Veuillez d'abord charger un PDF ou coller du texte.")
+            else:
+                with st.spinner("Analyse intelligente en cours..."):
+                    extracted = extract_criteria_ai(ao_content)
+                    # FIX : Mise à jour directe de la clé du widget pour le refresh
+                    st.session_state.crit_input = extracted
+                    st.toast("✅ Critères extraits avec succès !", icon="✨")
+                    time.sleep(0.5)
                     st.rerun()
 
     with col_criteria:
         st.subheader("2. Paramètres")
-        # Le champ est relié au session_state pour se remplir automatiquement
-        criteria = st.text_area("Dealbreakers (Points Bloquants)", height=250, value=st.session_state.criteria_val, key="crit_input")
+        # Le widget utilise la clé 'crit_input' liée au session_state
+        criteria = st.text_area("Dealbreakers (Points Bloquants)", height=250, key="crit_input")
         threshold = st.slider("Seuil Matching", 0.3, 0.8, 0.45)
         limit = st.number_input("Nb Profils", 1, 20, 5)
     
     st.divider()
     
     if st.button("🚀 LANCER L'ANALYSE INTELLIGENTE", type="primary"):
-        # On définit le contenu final à utiliser
-        final_ao = ao_content if ao_content else st.session_state.input_ao
+        final_ao = ao_content if ao_content else st.session_state.get('input_ao', '')
 
         if not final_ao:
             st.error("⚠️ Texte de l'offre vide.")
         else:
             with st.status("Recherche & Audit IA...", expanded=True) as status:
-                # 1. Vector Search
                 q_vec = get_embedding(final_ao[:8000])
                 res_db = supabase.rpc('match_candidates', {'query_embedding': q_vec, 'match_threshold': threshold, 'match_count': limit}).execute()
                 cands = res_db.data
@@ -359,23 +361,19 @@ with tab_search:
                         
                         nom_candidat = infos.get('nom', 'Inconnu')
                         nom_fichier_titre = r.get('file_name_orig', 'Document')
-
                         s_cls = "sc-good" if sc >= 70 else "sc-mid" if sc >= 40 else "sc-bad"
                         
                         with st.expander(f"📄 {nom_fichier_titre} — Score {sc}/100", expanded=(sc>=60)):
-                            
                             c_main, c_badge = st.columns([4, 1])
                             with c_main:
                                 st.markdown(f"<div class='name-title'>{nom_candidat}</div>", unsafe_allow_html=True)
                                 st.markdown(f"<div class='job-subtitle'>{infos.get('poste_actuel', '')} • {infos.get('ville', '')}</div>", unsafe_allow_html=True)
-                                
                                 st.markdown(f"""
                                 <div style='margin-top:10px;'>
                                     <span class='tag tag-blue'>✉️ {infos.get('email', 'N/A')}</span>
                                     <span class='tag tag-blue'>📱 {infos.get('tel', 'N/A')}</span>
                                     <span class='tag tag-blue'><a href='{infos.get('linkedin', '#')}' target='_blank'>LinkedIn</a></span>
-                                </div>
-                                """, unsafe_allow_html=True)
+                                </div>""", unsafe_allow_html=True)
                                 
                                 red_flags = analyse.get('red_flags', [])
                                 if red_flags:
@@ -416,7 +414,6 @@ with tab_search:
                                             <div class='ev-skill' style='color:#b91c1c;'>CRITIQUE : {m}</div>
                                             <div class='ev-proof'>Absence totale détectée.</div>
                                         </div>""", unsafe_allow_html=True)
-                                
                                 secs = competences.get('manquant_secondaire', [])
                                 if secs: st.markdown("**Secondaires :** " + ", ".join([f"<span style='color:#64748b'>{x}</span>" for x in secs]), unsafe_allow_html=True)
 
@@ -431,7 +428,6 @@ with tab_search:
                                         else: t, e, d = h.titre, h.entreprise, h.duree
                                         st.markdown(f"**{t}** chez *{e}*")
                                         st.caption(f"{d}")
-                            
                             with c_quest:
                                 st.markdown("<div class='section-header'>🎤 Questions Entretien</div>", unsafe_allow_html=True)
                                 if entretien:
@@ -444,7 +440,7 @@ with tab_search:
                             
                             if "Erreur" in str(analyse.get('verdict_auditeur', '')):
                                 st.divider()
-                                st.warning("Debug JSON (L'IA a eu du mal)")
+                                st.warning("Debug JSON")
                                 st.text_area("Raw", r.get('raw_response', ''), height=100, key=f"debug_{i}")
 
 # --- ONGLET 2 : INGESTION ---
@@ -504,5 +500,6 @@ with tab_history:
             with col_act:
                 if st.button("♻️ Relancer", key=f"hist_{h['id']}"):
                     st.session_state.preload_ao = h['query_text']
-                    st.session_state.criteria_val = h['criteria_used'] # Modifié pour V35
+                    # On met à jour la clé du widget pour que le text_area l'affiche
+                    st.session_state.crit_input = h['criteria_used']
                     st.toast("AO Chargé ! Allez dans l'onglet Recherche.")
