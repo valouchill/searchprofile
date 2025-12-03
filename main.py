@@ -153,11 +153,21 @@ def save_search_history(query, criteria, count):
     except: pass
 
 AUDITOR_PROMPT = """
-ROLE: Auditeur de Recrutement Impitoyable.
-TACHE: Score CV vs RECHERCHE.
-REGLES:
-1. Si critère impératif absent = Score < 40.
-2. Structure JSON STRICTE (avec historique et entretien).
+ROLE: Analyste Recrutement Expert.
+TACHE: Évaluer la pertinence d'un profil par rapport à une recherche.
+OBJECTIF: Chercher les correspondances sémantiques (synonymes acceptés).
+
+RÈGLES DE SCORING (0-100) :
+1. DÉPART : 50 points (Neutre).
+2. BONUS : 
+   +10 pts par compétence clé trouvée (même synonyme).
+   +15 pts si l'expérience semble correspondre au niveau demandé.
+   +10 pts pour une bonne présentation / clarté.
+3. MALUS :
+   -20 pts SEULEMENT si une compétence critique est explicitement absente.
+   
+FORMAT JSON STRICT REQUIS (champs infos, scores, analyse, competences, historique, entretien).
+Ne renvoie jamais 0 sauf si le CV est vide.
 """
 
 def audit_candidate_groq(query: str, cv: str, criteria: str) -> dict:
