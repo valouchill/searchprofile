@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v32.0 (CRM EDITION - HISTORIQUE & RELOAD)
+# AI Recruiter PRO — v33.0 (FILENAME AS TITLE)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -15,7 +15,7 @@ from supabase import create_client, Client
 # -----------------------------
 # 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v32", layout="wide", page_icon="💎")
+st.set_page_config(page_title="AI Recruiter PRO v33", layout="wide", page_icon="💎")
 
 st.markdown("""
 <style>
@@ -101,7 +101,9 @@ class CandidateData(BaseModel):
     analyse: Analyse = Analyse()
     competences: Competences = Competences()
     historique: List[dict] = []; entretien: List[dict] = []
+    # Champs systèmes
     raw_response: str = "" 
+    file_name_orig: str = "" # Pour stocker le nom du fichier
 
 DEFAULT_DATA = CandidateData().dict(by_alias=True)
 
@@ -238,7 +240,7 @@ def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
         return safe_data
 
 # -----------------------------
-# 4. SESSION STATE (Pour le rechargement)
+# 4. SESSION STATE
 # -----------------------------
 if 'preload_ao' not in st.session_state: st.session_state.preload_ao = ""
 if 'preload_criteria' not in st.session_state: st.session_state.preload_criteria = ""
@@ -246,7 +248,7 @@ if 'preload_criteria' not in st.session_state: st.session_state.preload_criteria
 # -----------------------------
 # 5. INTERFACE
 # -----------------------------
-st.title("💎 ALTEN Project - Match AO/Profil IC/Candidats")
+st.title("💎 AI Recruiter PRO — V33 (Filename Title)")
 
 # --- TABS ---
 tab_search, tab_ingest, tab_manage, tab_history = st.tabs(["🔎 RECHERCHE", "📥 INGESTION CV", "🗄️ GESTION BDD", "📜 HISTORIQUE AO"])
@@ -259,8 +261,6 @@ with tab_search:
     with col_upload:
         st.subheader("1. L'Offre (AO)")
         ao_pdf = st.file_uploader("Fiche de Poste (PDF)", type="pdf")
-        
-        # On utilise le session_state pour pré-remplir si on vient de l'historique
         ao_manual = st.text_area("Ou texte", height=150, value=st.session_state.preload_ao, key="input_ao")
         
         if ao_pdf:
@@ -284,33 +284,27 @@ with tab_search:
             st.error("⚠️ Texte de l'offre vide.")
         else:
             with st.status("Recherche Vectorielle & Audit IA...", expanded=True) as status:
-                # 1. Sauvegarde
-                # On ne sauvegarde que si c'est une nouvelle recherche (pas un reload exact)
-                # (Simplification : on sauvegarde tout)
-                
-                # 2. Vector Search
+                # 1. Vector Search
                 q_vec = get_embedding(ao_content[:8000])
                 res_db = supabase.rpc('match_candidates', {'query_embedding': q_vec, 'match_threshold': threshold, 'match_count': limit}).execute()
                 cands = res_db.data
                 
-                # Sauvegarde Historique (On sauvegarde après avoir trouvé pour avoir le count)
+                # Sauvegarde Historique
                 save_search_history(ao_content, criteria, len(cands))
                 
                 if not cands:
                     status.update(label="❌ 0 Candidat trouvé", state="error")
                 else:
-                    status.write(f"✅ {len(cands)} profils identifiés. Audit IA (Eco-Mode)...")
+                    status.write(f"✅ {len(cands)} profils identifiés. Audit IA...")
                     final_results = []
                     bar = st.progress(0)
                     
                     for i, c in enumerate(cands):
                         audit = audit_candidate_groq(ao_content, c['contenu_texte'], criteria)
                         
-                        infos = audit.get('infos', {})
-                        if not infos.get('nom') or infos.get('nom') == "Candidat Inconnu":
-                            if 'infos' not in audit: audit['infos'] = {}
-                            audit['infos']['nom'] = c.get('nom_fichier', 'Fichier Sans Nom')
-                            
+                        # --- MODIF V33 : STOCKAGE DU NOM DE FICHIER ---
+                        audit['file_name_orig'] = c.get('nom_fichier', 'Fichier Inconnu')
+                        
                         final_results.append(audit)
                         bar.progress((i+1)/len(cands))
                     
@@ -327,20 +321,24 @@ with tab_search:
                         competences = r.get('competences', {})
                         historique = r.get('historique', [])
                         entretien = r.get('entretien', [])
-                        nom = infos.get('nom', 'Inconnu')
                         
-                        # Code couleur
+                        # NOM INTERNE (IA)
+                        nom_candidat = infos.get('nom', 'Inconnu')
+                        # NOM RUBAN (FICHIER)
+                        nom_fichier_titre = r.get('file_name_orig', 'Document')
+
                         s_cls = "sc-good" if sc >= 70 else "sc-mid" if sc >= 40 else "sc-bad"
                         
-                        with st.expander(f"{nom} — Score {sc}/100", expanded=(sc>=60)):
+                        # --- MODIF V33 : TITRE RUBAN = FICHIER ---
+                        with st.expander(f"📄 {nom_fichier_titre} — Score {sc}/100", expanded=(sc>=60)):
                             
-                            # EN-TÊTE RICHE (Style V17)
+                            # EN-TÊTE RICHE
                             c_main, c_badge = st.columns([4, 1])
                             with c_main:
-                                st.markdown(f"<div class='name-title'>{nom}</div>", unsafe_allow_html=True)
+                                # Le nom du candidat apparaît ici, à l'intérieur
+                                st.markdown(f"<div class='name-title'>{nom_candidat}</div>", unsafe_allow_html=True)
                                 st.markdown(f"<div class='job-subtitle'>{infos.get('poste_actuel', '')} • {infos.get('ville', '')}</div>", unsafe_allow_html=True)
                                 
-                                # Tags
                                 st.markdown(f"""
                                 <div style='margin-top:10px;'>
                                     <span class='tag tag-blue'>✉️ {infos.get('email', 'N/A')}</span>
@@ -349,7 +347,6 @@ with tab_search:
                                 </div>
                                 """, unsafe_allow_html=True)
                                 
-                                # Verdict & Red Flags
                                 red_flags = analyse.get('red_flags', [])
                                 if red_flags:
                                     for flag in red_flags: st.error(f"🚩 {flag}")
@@ -365,7 +362,7 @@ with tab_search:
 
                             st.divider()
 
-                            # COLONNES PREUVES (Style V17)
+                            # COLONNES PREUVES
                             col_match, col_miss = st.columns(2)
                             with col_match:
                                 st.markdown("<div class='section-header'>✅ Points Forts Validés</div>", unsafe_allow_html=True)
@@ -460,7 +457,7 @@ with tab_manage:
             st.write("")
             if st.button("🗑️ Supprimer", type="primary"): delete_candidate(selected_id)
 
-# --- ONGLET 4 : HISTORIQUE AO (NOUVEAU) ---
+# --- ONGLET 4 : HISTORIQUE AO ---
 with tab_history:
     st.header("📜 Historique des Appels d'Offres")
     history = fetch_ao_history()
@@ -469,24 +466,16 @@ with tab_history:
         st.info("Aucun historique pour l'instant.")
     else:
         st.markdown("Recliquez sur **Relancer** pour recharger le contexte dans l'onglet Recherche.")
-        
         for h in history:
             col_date, col_txt, col_res, col_act = st.columns([1, 4, 1, 1])
-            
-            with col_date:
-                st.caption(h['created_at'][:10])
-            
+            with col_date: st.caption(h['created_at'][:10])
             with col_txt:
                 with st.expander(f"{h['query_text'][:60]}..."):
                     st.write("**AO Complet :**", h['query_text'])
                     st.write("**Critères :**", h['criteria_used'])
-            
-            with col_res:
-                st.markdown(f"**{h['results_count']}** profils")
-            
+            with col_res: st.markdown(f"**{h['results_count']}** profils")
             with col_act:
                 if st.button("♻️ Relancer", key=f"hist_{h['id']}"):
-                    # ON CHARGE DANS LA SESSION
                     st.session_state.preload_ao = h['query_text']
                     st.session_state.preload_criteria = h['criteria_used']
                     st.toast("AO Chargé ! Allez dans l'onglet Recherche.")
