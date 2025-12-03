@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v36.0 (FIX BOUTON EXTRACTION)
+# AI Recruiter PRO — v37.0 (SEVERE SCORING & SCEPTIC AUDIT)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -15,7 +15,7 @@ from supabase import create_client, Client
 # -----------------------------
 # 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v36", layout="wide", page_icon="🧠")
+st.set_page_config(page_title="AI Recruiter PRO v37", layout="wide", page_icon="⚖️")
 
 st.markdown("""
 <style>
@@ -138,6 +138,7 @@ def ingest_cv_to_db(file, text):
         "nom_fichier": file.name, "contenu_texte": text, "embedding": vector
     }).execute()
 
+# --- NETTOYEUR JSON ---
 def clean_json_string(text: str) -> str:
     text = re.sub(r'```json', '', text)
     text = re.sub(r'```', '', text)
@@ -194,7 +195,6 @@ def extract_criteria_ai(ao_text: str) -> str:
     
     1. IMPÉRATIFS (DEALBREAKERS) :
     - ...
-    - ...
     
     2. SECONDAIRES (BONUS) :
     - ...
@@ -212,40 +212,47 @@ def extract_criteria_ai(ao_text: str) -> str:
     except Exception as e:
         return f"Erreur extraction: {e}"
 
-# --- PROMPT AUDIT (SMART) ---
+# --- PROMPT AUDIT (SCEPTIQUE & SEVERE) ---
 AUDITOR_PROMPT = """
-ROLE: Auditeur de Recrutement Senior (Expert Analyse).
-TACHE: Analyser la pertinence CV vs AO.
-INSTRUCTION: Renvoie UNIQUEMENT du JSON valide. Sois précis et exigeant.
+ROLE: Auditeur de Risque Recrutement (Sceptique & Sévère).
+TACHE: Vérifier la véracité et l'adéquation d'un profil vs AO.
+PHILOSOPHIE: "Pas de preuve chiffrée = Pas de points". Le candidat est présumé "vendeur de rêve" par défaut.
 
-SCORING RULES (0-100):
-- Si critère critique manquant = Score < 30.
-- Si excellent profil = > 80.
-- Analyse les synonymes et le contexte.
+ÉCHELLE DE NOTATION SÉVÈRE (GLOBAL SCORE /100) :
+- [0-40] DISQUALIFIÉ : Manque un critère impératif (Langue, Diplôme, Expérience dure).
+- [41-60] RISQUÉ : Profil junior, reconversion, ou compétences citées sans contexte/durée.
+- [61-75] STANDARD : Profil qui fait le job, sans plus.
+- [76-85] SOLIDE : Match parfait, preuves concrètes partout.
+- [86-100] EXCEPTIONNEL : Mouton à 5 pattes uniquement.
 
-STRUCTURE JSON REQUISE:
+RÈGLES DE PÉNALITÉ :
+1. Si un dealbreaker est "à peu près" là mais pas exact (ex: Anglais B2 au lieu de C1) -> SCORE MAX 50.
+2. Si les descriptions sont floues ("participation à...", "aide sur...") -> PENALITÉ -15 PTS.
+3. Si le CV est mal structuré ou bourré de fautes -> PENALITÉ -10 PTS (Fit).
+
+FORMAT JSON STRICT :
 {
     "infos": { "nom": "...", "poste_actuel": "...", "email": "...", "tel": "...", "ville": "...", "linkedin": "..." },
-    "scores": { "global": 0, "tech": 0, "experience": 0, "fit": 0 },
+    "scores": { "global": int, "tech": int, "experience": int, "fit": int },
     "competences": {
-        "match_details": [ {"skill": "...", "preuve": "...", "niveau": "..."} ],
-        "manquant_critique": ["..."],
+        "match_details": [ {"skill": "...", "preuve": "Citation précise (Date/Chiffre)", "niveau": "Expert/Confirmé/Junior"} ],
+        "manquant_critique": ["LISTE PRÉCISE"],
         "manquant_secondaire": ["..."]
     },
-    "analyse": { "verdict_auditeur": "...", "red_flags": ["..."] },
+    "analyse": { "verdict_auditeur": "Ton sévère et factuel. Commence par 'PROFIL RISQUÉ' ou 'PROFIL SOLIDE'...", "red_flags": ["..."] },
     "historique": [ {"titre": "...", "entreprise": "...", "duree": "..."} ],
-    "entretien": [ {"question": "...", "reponse_attendue": "..."} ]
+    "entretien": [ {"question": "Question piège pour vérifier...", "reponse_attendue": "..."} ]
 }
 """
 
 def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
-    user_prompt = f"AO: {ao_text[:2000]}... CRITERES: {criteria}... CV: {cv_text[:3500]}..."
+    user_prompt = f"AO: {ao_text[:2000]}... DEALBREAKERS: {criteria}... CV: {cv_text[:3500]}..."
     safe_data = deepcopy(DEFAULT_DATA)
     try:
         res = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="llama-3.3-70b-versatile", # Smart Model
             messages=[{"role": "system", "content": AUDITOR_PROMPT}, {"role": "user", "content": user_prompt}],
-            temperature=0.0,
+            temperature=0.0, # Zéro créativité = Sévérité max
             response_format={"type": "json_object"} 
         )
         raw_content = res.choices[0].message.content
@@ -267,12 +274,12 @@ def audit_candidate_groq(ao_text: str, cv_text: str, criteria: str) -> dict:
 # 4. SESSION STATE
 # -----------------------------
 if 'preload_ao' not in st.session_state: st.session_state.preload_ao = ""
-if 'crit_input' not in st.session_state: st.session_state.crit_input = "" # Clé directe du widget
+if 'crit_input' not in st.session_state: st.session_state.crit_input = "" 
 
 # -----------------------------
 # 5. INTERFACE
 # -----------------------------
-st.title("🧠 AI Recruiter PRO — V36 (Extraction Fixed)")
+st.title("⚖️ AI Recruiter PRO — V37 (Severe Audit)")
 
 # --- TABS ---
 tab_search, tab_ingest, tab_manage, tab_history = st.tabs(["🔎 RECHERCHE", "📥 INGESTION CV", "🗄️ GESTION BDD", "📜 HISTORIQUE AO"])
@@ -287,46 +294,47 @@ with tab_search:
         ao_pdf = st.file_uploader("Fiche de Poste (PDF)", type="pdf")
         ao_manual = st.text_area("Ou texte", height=150, value=st.session_state.preload_ao, key="input_ao")
         
-        # Gestion du contenu AO
         if ao_pdf:
             txt = extract_pdf_safe(ao_pdf.read())
             if txt: 
                 ao_content = txt
                 st.success(f"✅ PDF lu ({len(txt)} chars)")
+                if st.button("✨ Extraire les critères via IA", type="secondary"):
+                    with st.spinner("Analyse intelligente..."):
+                        extracted = extract_criteria_ai(txt)
+                        st.session_state.crit_input = extracted
+                        st.toast("✅ Critères extraits !", icon="✨")
+                        time.sleep(0.5)
+                        st.rerun()
             else: st.error("⚠️ PDF vide.")
         elif ao_manual: 
             ao_content = ao_manual
-
-        # --- LE BOUTON FIXÉ ---
-        # Le bouton fonctionne si on a du contenu (soit PDF lu, soit texte manuel)
-        if st.button("✨ Extraire les critères via IA", type="secondary"):
-            if not ao_content:
-                st.error("❌ Veuillez d'abord charger un PDF ou coller du texte.")
-            else:
-                with st.spinner("Analyse intelligente en cours..."):
-                    extracted = extract_criteria_ai(ao_content)
-                    # FIX : Mise à jour directe de la clé du widget pour le refresh
-                    st.session_state.crit_input = extracted
-                    st.toast("✅ Critères extraits avec succès !", icon="✨")
-                    time.sleep(0.5)
-                    st.rerun()
+            if st.button("✨ Extraire les critères via IA", type="secondary"):
+                if not ao_content:
+                    st.error("❌ Texte vide.")
+                else:
+                    with st.spinner("Analyse intelligente..."):
+                        extracted = extract_criteria_ai(ao_content)
+                        st.session_state.crit_input = extracted
+                        st.toast("✅ Critères extraits !", icon="✨")
+                        time.sleep(0.5)
+                        st.rerun()
 
     with col_criteria:
         st.subheader("2. Paramètres")
-        # Le widget utilise la clé 'crit_input' liée au session_state
         criteria = st.text_area("Dealbreakers (Points Bloquants)", height=250, key="crit_input")
-        threshold = st.slider("Seuil Matching", 0.3, 0.8, 0.45)
+        threshold = st.slider("Seuil Matching (Filtre)", 0.3, 0.8, 0.45)
         limit = st.number_input("Nb Profils", 1, 20, 5)
     
     st.divider()
     
-    if st.button("🚀 LANCER L'ANALYSE INTELLIGENTE", type="primary"):
+    if st.button("🚀 LANCER L'AUDIT SÉVÈRE", type="primary"):
         final_ao = ao_content if ao_content else st.session_state.get('input_ao', '')
 
         if not final_ao:
             st.error("⚠️ Texte de l'offre vide.")
         else:
-            with st.status("Recherche & Audit IA...", expanded=True) as status:
+            with st.status("Recherche & Audit Sévère...", expanded=True) as status:
                 q_vec = get_embedding(final_ao[:8000])
                 res_db = supabase.rpc('match_candidates', {'query_embedding': q_vec, 'match_threshold': threshold, 'match_count': limit}).execute()
                 cands = res_db.data
@@ -336,7 +344,7 @@ with tab_search:
                 if not cands:
                     status.update(label="❌ 0 Candidat trouvé", state="error")
                 else:
-                    status.write(f"✅ {len(cands)} profils identifiés. Audit Expert...")
+                    status.write(f"✅ {len(cands)} profils. Audit Sceptique en cours...")
                     final_results = []
                     bar = st.progress(0)
                     
@@ -361,7 +369,9 @@ with tab_search:
                         
                         nom_candidat = infos.get('nom', 'Inconnu')
                         nom_fichier_titre = r.get('file_name_orig', 'Document')
-                        s_cls = "sc-good" if sc >= 70 else "sc-mid" if sc >= 40 else "sc-bad"
+                        
+                        # Palier plus dur pour le vert
+                        s_cls = "sc-good" if sc >= 75 else "sc-mid" if sc >= 50 else "sc-bad"
                         
                         with st.expander(f"📄 {nom_fichier_titre} — Score {sc}/100", expanded=(sc>=60)):
                             c_main, c_badge = st.columns([4, 1])
@@ -380,19 +390,19 @@ with tab_search:
                                     for flag in red_flags: st.error(f"🚩 {flag}")
                                 
                                 manquants = competences.get('manquant_critique', [])
-                                if manquants: st.error(f"⛔ **Manquants :** {', '.join(manquants)}")
+                                if manquants: st.error(f"⛔ **Disqualification :** {', '.join(manquants)}")
                                 
-                                st.info(f"💡 **Avis:** {analyse.get('verdict_auditeur', '...')}")
+                                st.info(f"💡 **Verdict:** {analyse.get('verdict_auditeur', '...')}")
 
                             with c_badge:
                                 st.markdown(f"<div class='score-badge {s_cls}'>{sc}</div>", unsafe_allow_html=True)
-                                st.caption("Score Fiabilité")
+                                st.caption("Score Sévère")
 
                             st.divider()
 
                             col_match, col_miss = st.columns(2)
                             with col_match:
-                                st.markdown("<div class='section-header'>✅ Points Forts Validés</div>", unsafe_allow_html=True)
+                                st.markdown("<div class='section-header'>✅ Preuves Trouvées</div>", unsafe_allow_html=True)
                                 match_details = competences.get('match_details', [])
                                 if match_details:
                                     for item in match_details:
@@ -403,16 +413,16 @@ with tab_search:
                                             <div class='ev-skill'>{s} <span style='font-weight:400; color:#64748b;'>({n})</span></div>
                                             <div class='ev-proof'>"{p}"</div>
                                         </div>""", unsafe_allow_html=True)
-                                else: st.caption("Rien de notable.")
+                                else: st.caption("Aucune preuve solide.")
 
                             with col_miss:
-                                st.markdown("<div class='section-header'>❌ Lacunes & Risques</div>", unsafe_allow_html=True)
+                                st.markdown("<div class='section-header'>❌ Points d'Attention</div>", unsafe_allow_html=True)
                                 if manquants:
                                     for m in manquants:
                                         st.markdown(f"""
                                         <div class='evidence-box ev-missing'>
                                             <div class='ev-skill' style='color:#b91c1c;'>CRITIQUE : {m}</div>
-                                            <div class='ev-proof'>Absence totale détectée.</div>
+                                            <div class='ev-proof'>Absence totale ou floue.</div>
                                         </div>""", unsafe_allow_html=True)
                                 secs = competences.get('manquant_secondaire', [])
                                 if secs: st.markdown("**Secondaires :** " + ", ".join([f"<span style='color:#64748b'>{x}</span>" for x in secs]), unsafe_allow_html=True)
@@ -429,12 +439,12 @@ with tab_search:
                                         st.markdown(f"**{t}** chez *{e}*")
                                         st.caption(f"{d}")
                             with c_quest:
-                                st.markdown("<div class='section-header'>🎤 Questions Entretien</div>", unsafe_allow_html=True)
+                                st.markdown("<div class='section-header'>🎤 Questions Pièges</div>", unsafe_allow_html=True)
                                 if entretien:
                                     for q in entretien:
                                         if isinstance(q, dict): qu, re = q.get('question',''), q.get('reponse_attendue','')
                                         else: qu, re = q.question, q.reponse_attendue
-                                        with st.expander("❓ Question suggérée"):
+                                        with st.expander("❓ Question"):
                                             st.write(f"**Q:** {qu}")
                                             st.caption(f"💡 Attendu : {re}")
                             
@@ -500,6 +510,5 @@ with tab_history:
             with col_act:
                 if st.button("♻️ Relancer", key=f"hist_{h['id']}"):
                     st.session_state.preload_ao = h['query_text']
-                    # On met à jour la clé du widget pour que le text_area l'affiche
                     st.session_state.crit_input = h['criteria_used']
                     st.toast("AO Chargé ! Allez dans l'onglet Recherche.")
