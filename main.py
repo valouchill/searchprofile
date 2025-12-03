@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v26.0 (DEBUG & FIX EDITION)
+# Valentin Gestion des profils — v26.0 (DEBUG & FIX EDITION)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
