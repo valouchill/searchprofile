@@ -1,4 +1,4 @@
-# AI Recruiter PRO — v22.0 (Stable Fix + Prompt Punitif + UI Premium)
+# AI Recruiter PRO — v23.0 (Fix Noms Disparus + UI Premium)
 # -------------------------------------------------------------------
 import streamlit as st
 import json, io, re, uuid, time
@@ -15,7 +15,7 @@ from supabase import create_client, Client
 # -----------------------------
 # 0. CONFIGURATION & STYLE
 # -----------------------------
-st.set_page_config(page_title="AI Recruiter PRO v22", layout="wide", page_icon="🛡️")
+st.set_page_config(page_title="AI Recruiter PRO v23", layout="wide", page_icon="🛡️")
 
 st.markdown("""
 <style>
@@ -122,16 +122,14 @@ def extract_pdf_safe(file_bytes: bytes) -> str:
     except: return ""
 
 def get_embedding(text: str) -> List[float]:
-    """Vectorisation avec Retry"""
     text = text.replace("\n", " ")
     for attempt in range(3):
         try:
             return openai_client.embeddings.create(input=[text], model="text-embedding-3-small").data[0].embedding
         except openai.RateLimitError:
             time.sleep((attempt + 1) * 2)
-        except Exception:
-            break
-    st.error("❌ Erreur OpenAI. Vérifiez vos crédits (Billing).")
+        except Exception: break
+    st.error("❌ Erreur OpenAI. Vérifiez vos crédits.")
     st.stop()
 
 def ingest_cv_to_db(file, text):
@@ -147,7 +145,7 @@ def save_search_history(query, criteria, count):
         }).execute()
     except: pass
 
-# --- PROMPT PUNITIF (DEMANDÉ) ---
+# --- PROMPT PUNITIF ---
 AUDITOR_PROMPT = """
 ROLE: Auditeur de Recrutement Impitoyable (Sanction Immédiate).
 TACHE: Vérifier factuellement l'adéquation CV vs OFFRE.
@@ -189,27 +187,18 @@ STRUCTURE JSON REQUISE :
 
 def audit_candidate_groq(query: str, cv: str, criteria: str) -> dict:
     user_prompt = f"--- OFFRE ---\n{query}\n\n--- CRITERES IMPERATIFS ---\n{criteria}\n\n--- CV ---\n{cv[:3500]}"
-    
-    # Structure de secours
     safe_data = deepcopy(DEFAULT_DATA)
-
     try:
         res = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": AUDITOR_PROMPT}, {"role": "user", "content": user_prompt}],
-            response_format={"type": "json_object"}, 
-            temperature=0.0
+            response_format={"type": "json_object"}, temperature=0.0
         )
-        
         ai_json = json.loads(res.choices[0].message.content)
-        
-        # Fusion sécurisée (Safe Merge)
         for key, value in ai_json.items():
             if key in safe_data and isinstance(safe_data[key], dict) and isinstance(value, dict):
                 safe_data[key].update(value)
-            else:
-                safe_data[key] = value
-                
+            else: safe_data[key] = value
         return safe_data
     except Exception as e:
         print(f"Err IA: {e}")
@@ -218,7 +207,7 @@ def audit_candidate_groq(query: str, cv: str, criteria: str) -> dict:
 # -----------------------------
 # 4. INTERFACE UTILISATEUR
 # -----------------------------
-st.title("🛡️ AI Recruiter PRO — Punitif Edition")
+st.title("🛡️ AI Recruiter PRO — Ultimate")
 
 # --- SIDEBAR HISTORIQUE ---
 with st.sidebar:
@@ -277,12 +266,9 @@ with tab_search:
                 for i, c in enumerate(cands):
                     audit = audit_candidate_groq(search_query, c['contenu_texte'], criteria)
                     
-                    # Sécurisation Nom
-                    infos = audit.get('infos', {})
-                    if not infos.get('nom') or infos.get('nom') == "Candidat Inconnu":
-                        if 'infos' not in audit: audit['infos'] = {}
-                        audit['infos']['nom'] = c['nom_fichier']
-                        
+                    # FIX NOMS DISPARUS (Sauvegarde du Filename)
+                    audit['nom_fichier_orig'] = c.get('nom_fichier', 'Fichier Inconnu')
+                    
                     final_results.append(audit)
                     bar.progress((i+1)/count)
                 
@@ -295,7 +281,7 @@ with tab_search:
                 st.subheader(f"Résultats de l'AO : {search_query}")
                 
                 for r in final_results:
-                    # Extraction sécurisée (Fix TypeError)
+                    # Extraction sécurisée (Fix TypeError & Noms)
                     scores = r.get('scores', {})
                     infos = r.get('infos', {})
                     analyse = r.get('analyse', {})
@@ -303,9 +289,13 @@ with tab_search:
                     historique = r.get('historique', [])
                     entretien = r.get('entretien', [])
 
+                    # LOGIQUE NOM : IA > Nom Fichier > "Inconnu"
+                    nom_cand = infos.get('nom', '')
+                    if not nom_cand or nom_cand == "Candidat Inconnu":
+                        nom_cand = r.get('nom_fichier_orig', 'Dossier Sans Nom')
+                    
                     sc = scores.get('global', 0)
                     s_cls = "sc-good" if sc >= 70 else "sc-mid" if sc >= 50 else "sc-bad"
-                    nom_cand = infos.get('nom', 'Inconnu')
                     
                     with st.expander(f"{nom_cand} — Score {sc}/100", expanded=(sc>=60)):
                         
@@ -348,8 +338,7 @@ with tab_search:
                                 for item in match_details:
                                     if isinstance(item, dict):
                                         s, n, p = item.get('skill',''), item.get('niveau',''), item.get('preuve','')
-                                    else: s, n, p = item.skill, item.niveau, item.preuve # Fallback
-                                        
+                                    else: s, n, p = item.skill, item.niveau, item.preuve
                                     st.markdown(f"""
                                     <div class='evidence-box'>
                                         <div class='ev-skill'>{s} <span style='font-weight:400; color:#64748b;'>({n})</span></div>
@@ -373,7 +362,7 @@ with tab_search:
 
                         st.divider()
 
-                        # HISTORIQUE
+                        # HISTORIQUE & QUESTIONS
                         c_hist, c_quest = st.columns(2)
                         with c_hist:
                             st.markdown("<div class='section-header'>📅 Parcours</div>", unsafe_allow_html=True)
